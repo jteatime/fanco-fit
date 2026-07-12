@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#141518" />
 <title>Franco Fit</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
-<link rel="manifest" href="manifest.webmanifest" />
+<link rel="manifest" href="manifest-j.webmanifest" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <meta name="apple-mobile-web-app-title" content="Franco Fit" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <style>html, body { margin: 0; background: #141518; }</style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-/* FRANCO FIT — VERSION A (Alicia) — standalone build */
+/* FRANCO FIT — VERSION J (Franco) — standalone GitHub build */
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ------------------------------------------------------------------ */
@@ -39,17 +39,16 @@ const T = {
   amber: "#E3A93C",
   blue: "#5B9DFF",
 };
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sunday"];
-const DAY_NUM = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Sunday: 0 };
+const DAYS = ["Tuesday", "Wednesday", "Friday", "Sunday"];
+const DAY_NUM = { Sunday: 0, Tuesday: 2, Wednesday: 3, Friday: 5 };
+/* Bumper-plate colors: red / blue / yellow / green */
 const DAY_COLOR = {
-  Monday: "#B08BD0",
   Tuesday: "#CE5148",
   Wednesday: "#5480C8",
-  Thursday: "#8B8F98",
   Friday: "#E3A93C",
   Sunday: "#5AA35F",
 };
-const OPTIONAL_DAYS = { Monday: true, Thursday: true };
+const OPTIONAL_DAYS = {};
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
@@ -113,90 +112,57 @@ textarea.ll-input { resize: vertical; min-height: 44px; font-size: 15px; }
 /* Seed data — imported from the Google Sheet (cycle 2, weeks 1–4)    */
 /* ------------------------------------------------------------------ */
 const RAW = {
-  Monday: {
-    dates: [],
-    ex: [
-      ["Hip Abductions", null, [], 3, 8],
-      ["Hip Thrusts", null, [], 3, 8],
-      ["RDL's", null, [], 3, 8],
-      ["Leg Press", null, [], 3, 8],
-      ["Cable Kickbacks", null, [], 3, 8],
-      ["Shoulder Press", null, [], 3, 8],
-      ["Face-Pulls", null, [], 3, 8],
-      ["Back Extensions", null, [], 3, 8],
-      ["Hamstring Curls", null, [], 3, 8],
-    ],
-  },
   Tuesday: {
-    dates: [],
+    dates: ["2026-06-16", "2026-06-23", "2026-06-30", "2026-07-07"],
     ex: [
-      ["Outer Thigh Machine", null, [], 6, 12],
-      ["Hip Thrusts", null, [], 6, 12],
-      ["RDL's", null, [], 6, 12],
-      ["Leg Press", null, [], 6, 12],
-      ["Cable Kickbacks", null, [], 6, 12],
-      ["Calves", null, [], 6, 12],
-      ["Rear Shoulders", null, [], 6, 12],
-      ["Triceps", null, [], 6, 12],
-      ["Seated Cable Row", null, [], 6, 12],
-      ["Bicep Curls", null, [], 6, 12],
+      ["Cable Leg Press", 250, ["140x15 160x12 160x16 160x12 160x7 160x9", "220x12 220x14 235x11 235x9 235x8 235x7", "60x15 60x12 60x9 60x8 60x8 60x9", "70x12 70x12 70x9 70x9 70x9 70x8"]],
+      ["Leg Curl", 105, ["70x8 60x9 60x7 50x8 50x6", "90x4 80x7 70x8 70x5 60x5 60x6", "85x8 80x6 65x7 65x8 65x5 60x6", "85x7 80x6 65x8 65x8 60x5 60x5"]],
+      ["Lateral Raise", 25, ["8x12 8x10 8x8 8x8", "10x9 10x12 10x8 10x7", "10x15 10x10 10x9 10x7", "12x6 10x10 10x8 10x8"]],
+      ["EZ Bar Curl", 50, ["80x10 80x7 80x7 70x5", "20x15 20x11 20x9 20x7", "50x14 50x5 36x7 36x7", "25x10 25x9 25x7 25x5"]],
+      ["Tri Extensions", 37, ["80x10 70x8 70x5 60x5", "70x10 70x8 60x9 60x7", "50x11 50x8 50x7 50x6", "65x4 50x12 50x9 50x8"]],
+      ["Incline Bench", 55, ["20x10 20x7 12.5x8 12.5x9 12.5x8 12.5x7", "26x12 26x8 26x6 26x7 26x5 26x5", "25x7 25x5 20x7 20x8 20x7 20x6", "30x2 25x9 25x6 25x5 20x8 20x6"]],
+      ["Med Cable Row", 125, ["95x15 140x8 125x9 125x8 110x9 110x8", "30x15 40x11 40x9 40x8 40x6 40x6", "90x12 90x10 90x8 90x8 90x9 90x7", "120x10 120x12 120x10 120x9 120x8 120x8"]],
     ],
   },
   Wednesday: {
-    dates: [],
+    dates: ["2026-06-17", "2026-06-24", "2026-07-01", "2026-07-08"],
     ex: [
-      ["Hip Abductions", null, [], 6, 12],
-      ["Hip Thrusts", null, [], 6, 12],
-      ["RDL's", null, [], 6, 12],
-      ["Leg Press", null, [], 6, 12],
-      ["Cable Kickbacks", null, [], 6, 12],
-      ["Peck Deck", null, [], 6, 12],
-      ["Lat Pulldown", null, [], 6, 12],
-      ["Seated Row", null, [], 6, 12],
-      ["Lateral Raises", null, [], 6, 12],
-    ],
-  },
-  Thursday: {
-    dates: [],
-    ex: [
-      ["Hip Abductions", null, [], 3, 8],
-      ["Hip Thrusts", null, [], 3, 8],
-      ["RDL's", null, [], 3, 8],
-      ["Leg Press", null, [], 3, 8],
-      ["Cable Kickbacks", null, [], 3, 8],
-      ["Shoulder Press", null, [], 3, 8],
-      ["Face-Pulls", null, [], 3, 8],
-      ["Back Extensions", null, [], 3, 8],
-      ["Hamstring Curls", null, [], 3, 8],
+      ["Peck Deck", 130, ["100x13 100x9 85x9 85x7 70x9 70x6", "120x5 100x9 80x9 80x7 80x6 80x6", "100x12 100x6 80x8 80x7 80x7 80x5", "130x12 130x9 130x7 130x7 130x6 130x6"]],
+      ["Lat Pulldown", 90, ["30x12 30x8 25x8 25x8 20x11 20x10", "30x12 30x6 30x10 30x7 30x7 30x4", "97x12 97x9 88x14 88x9 88x9 79x12", "97x13 97x12 97x10 97x11 97x10 97x9"]],
+      ["Dumbbell Press", 60, ["14x15 24x7 24x6 22x5", "22x10 22x9 22x6 22x5", "22x10 22x8 22x6 22x6", "22x12 22x9 22x7 22x7"]],
+      ["Machine Curl", 80, ["90x8 70x10 70x7 70x7", "12x7 12x8 12x6 12x4", "50x12 50x8 50x7 36x15", "25x10 25x9 25x7 25x5"]],
+      ["Dips", null, ["40x10 40x12 40x7 40x7", "0x6 0x7 0x9 0x6", "0x8 0x8 0x8 0x5", ""]],
+      ["Leg Extension", 160, ["50x15 60x12 60x12 60x10 60x13 60x11", "60x15 80x10 80x13 80x10 80x10 80x9", "60x15 80x15 80x12 80x12 80x10 80x10", "140x15 140x15 160x10 160x10 160x7 160x7"]],
+      ["Seated Leg Curl", 115, ["80x12 80x12 80x10 80x10 80x8 80x6", "80x13 80x10 80x10 80x8 80x7 80x6", "30x20 30x20 30x19", "80x7 65x9 65x6 60x5 50x6 50x6"]],
     ],
   },
   Friday: {
-    dates: [],
+    dates: ["2026-06-19", "2026-06-26", "2026-07-03", "2026-07-10"],
     ex: [
-      ["Outer Thigh Machine", null, [], 2, 8],
-      ["Hip Thrusts", null, [], 2, 8],
-      ["RDL's", null, [], 2, 8],
-      ["Leg Press", null, [], 2, 8],
-      ["Cable Kickbacks", null, [], 2, 8],
-      ["Calves", null, [], 2, 8],
-      ["Rear Shoulders", null, [], 2, 8],
-      ["Triceps", null, [], 2, 8],
-      ["Seated Cable Row", null, [], 2, 8],
-      ["Bicep Curls", null, [], 2, 8],
+      ["Leg Press", 280, ["180x10 180x12", "180x12 180x12", "55x8 65x10", "70x10 70x10"]],
+      ["Leg Curl", 88, ["70x5 70x6", "85x6 70x6", "80x7 70x7", "80x8 80x5"]],
+      ["Leg Extension", 135, ["145x13 145x12", "80x12 80x12", "145x12 145x10", "160x14 160x15"]],
+      ["Incline Bench", 45, ["20x10 20x8 20x7", "20x12 25x6 25x5", "25x7 25x7 25x5", "27x5 25x9 25x4"]],
+      ["Supported Row", 85, ["20x6 30x11 30x10", "100x12 130x10 130x8", "50x6 40x7 40x7", "130x12 130x10 130x10"]],
+      ["Chest Fly", 120, ["80x8 80x8", "80x10 110x6", "110x10 110x4", "145x12 145x8"]],
+      ["Lat Pulldown", 120, ["30x10 30x8", "100x12 100x10", "115x10 100x9", "105x15 105x13"]],
+      ["Lateral Raise", 80, ["10x10 10x11", "8x15 8x15", "10x15 10x10", "12x10 12x8"]],
+      ["Hammer Curls", 60, ["14x10 14x10", "16x10 16x7", "16x11 16x6", "16x11"]],
+      ["Tri Cable", 50, ["50x11 50x8", "50x9", "65x6 50x9", "65x6 50x11"]],
     ],
   },
   Sunday: {
-    dates: [],
+    dates: ["2026-06-21", "2026-06-28", "2026-07-05"],
     ex: [
-      ["Hip Abductions", null, [], 3, 6],
-      ["Hip Thrusts", null, [], 3, 6],
-      ["RDL's", null, [], 3, 6],
-      ["Leg Press", null, [], 3, 6],
-      ["Cable Kickbacks", null, [], 3, 6],
-      ["Shoulder Press", null, [], 3, 6],
-      ["Face-Pulls", null, [], 3, 6],
-      ["Back Extensions", null, [], 3, 6],
-      ["Seated Row", null, [], 3, 6],
+      ["Leg Press", 180, ["40x15 50x10 50x11", "50x10 60x12 60x10", "70x11 70x10 70x8"]],
+      ["Incline Bench", 55, ["22.5x11 22.5x7 22.5x7", "25x8 25x6 25x5", "27x5 25x9 25x5"]],
+      ["Cable Row", 85, ["25x15 35x14 35x14", "40x10 40x9 40x7", "110x13 130x9 130x8"]],
+      ["Peck Deck", 130, ["130x6 130x5 115x8", "130x13 130x14 130x11", "100x6 80x8 80x7"]],
+      ["Pulldown", 120, ["30x12 30x9 30x8", "145x5 115x8 115x8", "40x7 30x13 30x6"]],
+      ["Leg Curls", 98, ["90x3 80x6 80x5", "90x4 80x7 80x5", "90x4 80x6 70x7"]],
+      ["Lateral Raise", 25, ["10x12 10x10 10x7", "90x15 90x12 90x10", "120x11 120x10 120x9"]],
+      ["EZ Curl", 80, ["90x12 90x7", "25x11 25x7", "25x13 25x7"]],
+      ["Tri Cable", 50, ["50x12 50x6", "80x8 80x7", "50x10 50x7"]],
     ],
   },
 };
@@ -821,99 +787,39 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
 /* Celebrations — fires when the day's last exercise gets logged       */
 /* ------------------------------------------------------------------ */
 const CELEBRATIONS = [
-  "Fuck, {name}. You’re getting dangerously hot.",
-  "Wet floor. {name} just finished working out.",
-  "That pump is making me horny",
-  "Calm down, {name}. Some of us are trying not to stare.",
-  "Congratulations, {name}. You’re officially fuckable as hell.",
-  "God damn, {name}. Save some sex appeal for everyone else.",
-  "That body is begging to be touched, {name}.",
-  "Fuck me, {name}. That pump is obscene.",
-  "{name}, you’re one flex away from getting someone pregnant.",
-  "Making me wet, one rep at a time, {name}.",
-  "That workout made you significantly harder to resist, {name}.",
-  "{name}, you look like you fuck.",
-  "Someone’s imagining you naked right now, {name}.",
-  "{name}, that body deserves to be climbed.",
-  "Your gym crush is absolutely fucked, {name}.",
-  "That pump could make a grown man beg, {name}.",
-  "{name}, your body is giving me inappropriate thoughts.",
-  "Absolutely filthy physique, {name}.",
-  "{name}, you look like you’d ruin someone’s entire weekend.",
-  "Horny jail for you, {name}. Immediately.",
-  "{name}, you’re built like someone’s favorite fantasy.",
-  "That ass just gained market value, {name}.",
-  "{name}, you’re getting dangerously good at making people wet.",
-  "The mirror needs a cigarette after looking at you, {name}.",
-  "That body could make someone forget they’re married, {name}.",
-  "{name}, you’re looking very hard to behave around.",
-  "Fuck, {name}. Your body is becoming a public indecency.",
-  "{name}, your pump is giving “rip my clothes off.”",
-  "Someone’s biting their lip because of you, {name}.",
-  "{name}, you’re looking very lickable right now",
-  "{name}, you’re becoming a walking boner alert.",
-  "Hot. Sweaty. Fuckable. Good work, {name}.",
-  "That physique could turn a good person into a slut, {name}.",
-  "Your body is screaming “come fuck me,” {name}.",
-  "{name}, you look like you’d leave bite marks.",
-  "That pump is pure fucking foreplay, {name}.",
-  "{name}, we should do cardio in bed.",
-  "Congratulations, {name}. You’re someone’s masturbation material now.",
-  "{name}, your sex appeal just became medically concerning.",
-  "That workout made your clothes significantly less necessary, {name}.",
-  "Absolutely dripping over here, {name}.",
-  "{name}, that pump deserves to be touched slowly.",
-  "Your body just upgraded from attractive to sexually distracting, {name}.",
-  "The gym got wetter when you finished, {name}.",
-  "{name}, your physique is becoming indecent.",
-  "{name}, your body is now in face-sitting mode.",
-  "That workout made you look aggressively breedable, {name}.",
-  "{name}, you could get away with some terrible behavior looking like that.",
-  "Your pump is making my thoughts filthy, {name}.",
-  "{name}, you’re becoming the kind of hot that ruins friendships.",
-  "That body belongs against someone’s bedroom wall, {name}.",
-  "{name}, you look like you’d be difficult to get over.",
-  "Fuck the workout, {name}. Let’s talk about what that pump is doing to me.",
-  "You are officially too hot for respectful eye contact, {name}.",
-  "{name}, you’re one shirtless photo away from causing chaos.",
-  "That body could make someone say “yes” before hearing the question, {name}.",
-  "The pump is real. So is my erection, {name}.",
-  "{name}, you’re getting hot enough to make people act out of character.",
-  "Your body is giving “fuck me first, ask questions later,” {name}.",
-  "{name}, you just turned sweat into a sexual weapon.",
-  "That pump has me soaking wet, {name}.",
-  "{name}, your body deserves an adults-only warning.",
-  "Someone wants to sit on your face, {name}.",
-  "Your sex appeal just hit a new personal record, {name}.",
-  "{name}, the workout is over. The dirty thoughts are beginning.",
-  "{name}, you’re looking painfully fuckable today.",
-  "The iron is hard. I’m harder, {name}.",
-  "{name}, you’re one flex away from making me lose my fucking mind.",
-  "Workout complete. Sexual threat level increased, {name}.",
-  "{name}, your body is officially rated R.",
-  "You finished the workout, {name}. Now finish me.",
-  "Good fucking work, {name}. Emphasis on the fucking.",
-  "Your glutes are growing. So is my erection, {name}.",
-  "I’m hard. You’re hot. Great workout, {name}.",
-  "That ass is getting breedable as fuck, {name}.",
-  "I would like to inspect that pump more closely, {name}.",
-  "I can’t decide whether to worship that ass or bite it.",
-  "I’m harder than the workout you just finished, {name}.",
-  "I’m imagining what that glute pump feels like in my hands.",
-  "Your glutes are activated. So am I.",
-  "Your body is becoming a breeding fantasy, {name}.",
-  "That ass deserves praise, attention, and several uninterrupted hours.",
-  "Your ass just set a personal record in making me horny.",
-  "You’re looking so breedable I forgot what this notification was supposed to say.",
-  "Your ass is making my mouth water, {name}.",
-  "That glute pump belongs directly in my face.",
-  "I’m trying to celebrate your discipline. My erection is celebrating your ass.",
-  "Your workout is complete. My breeding thoughts are just getting started.",
-  "I’m ready to give that glute pump the attention it deserves.",
-  "Your legs are shaking. I’d like to keep that trend going.",
-  "Your ass is now officially my favorite muscle group.",
-  "I’d say good workout {name}, but “sit on my face” feels more honest.",
-  "You look like you need protein, hydration, and several inches in bed",
+  "Fuck yea!",
+  "Another banger day!",
+  "Sexier by the minute!",
+  "Beast mode: certified.",
+  "The iron never stood a chance.",
+  "Built different. Literally.",
+  "That's a wrap, champ!",
+  "Violence. Beautiful violence.",
+  "The mirror says thank you.",
+  "Absolute unit behavior.",
+  "You vs you: you won.",
+  "Certified plate mover.",
+  "Cooked every set. Chef's kiss.",
+  "The gym owes YOU money.",
+  "Stronger than yesterday. Facts.",
+  "That bar is scared of you now.",
+  "Muscles heard. Muscles obeyed.",
+  "Full send, fully sent.",
+  "Legend behavior detected.",
+  "Body under construction. On schedule.",
+  "Zero reps left behind.",
+  "Savage session complete.",
+  "Future you is flexing already.",
+  "Discipline looks good on you.",
+  "Another brick on the temple.",
+  "That was disgusting. In the best way.",
+  "PR energy all day.",
+  "Clocked in. Clocked OUT.",
+  "The pump is real and it's spectacular.",
+  "Hard as a coffin nail.",
+  "No missed reps, no mercy.",
+  "Iron paid. Respect earned.",
+  "Gravity filed a complaint.",
 ];
 
 function Celebration({ msg, refeed, onClose }) {
@@ -1009,7 +915,7 @@ function TodayView({ data, update, day, setDay }) {
           return (
             <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
               <DayStatusIcon status={st} size={7} />
-              {d.slice(0, 1)}
+              {DAYS.length > 4 ? d.slice(0, 1) : d.slice(0, 3)}
             </button>
           );
         })}
@@ -1300,7 +1206,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
           return (
             <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
               <DayStatusIcon status={st} size={7} />
-              {d.slice(0, 1)}
+              {DAYS.length > 4 ? d.slice(0, 1) : d.slice(0, 3)}
             </button>
           );
         })}
@@ -1606,12 +1512,12 @@ function ManageView({ data, update, reseed, restore }) {
           {confirmReset ? (
             <Row>
               <button className="ll-btn" style={{ flex: 1, color: T.neg }} onClick={() => { reseed(); setConfirmReset(false); }}>
-                Yes, wipe everything and start fresh
+                Yes, wipe everything and re-import the sheet
               </button>
               <button className="ll-btn" onClick={() => setConfirmReset(false)}>Cancel</button>
             </Row>
           ) : (
-            <button className="ll-btn ll-btn-sm" style={{ color: T.neg }} onClick={() => setConfirmReset(true)}>Reset app</button>
+            <button className="ll-btn ll-btn-sm" style={{ color: T.neg }} onClick={() => setConfirmReset(true)}>Reset to sheet data</button>
           )}
         </div>
       </div>
@@ -1685,20 +1591,15 @@ const window_storage = {
   async set(k, v) { localStorage.setItem(k, v); return { key: k, value: v }; },
 };
 
-/* Version A starts fresh with Alicia's routine */
-function freshSeed() {
+/* Version J keeps the full sheet history seed */
+function seedJ() {
   const d = buildSeed();
-  d.sessions = {};
-  d.cycleNumber = 1;
-  d.cycleName = "Cycle 1";
-  d.cycleStart = todayISO();
-  d.unit = "lb";
-  d.userName = "Alicia";
+  d.userName = "Franco";
   d.nameAsked = true;
   return d;
 }
 
-const STORAGE_KEY = "franco-fit-a-v2";
+const STORAGE_KEY = "franco-fit-j-v1";
 
 function App() {
   const [data, setData] = useState(null);
@@ -1723,7 +1624,7 @@ function App() {
         }
         throw new Error("empty");
       } catch {
-        const seed = freshSeed();
+        const seed = seedJ();
         setData(seed);
         try { await window_storage.set(STORAGE_KEY, JSON.stringify(seed)); }
         catch { setLoadError(true); }
@@ -1754,7 +1655,7 @@ function App() {
   };
 
   const reseed = () => {
-    const seed = freshSeed();
+    const seed = seedJ();
     setData(seed);
     scheduleSave(seed);
   };
