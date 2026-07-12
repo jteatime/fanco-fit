@@ -1353,7 +1353,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
 /* ------------------------------------------------------------------ */
 /* Manage view                                                         */
 /* ------------------------------------------------------------------ */
-function ManageView({ data, update, reseed }) {
+function ManageView({ data, update, reseed, restore }) {
   const [confirmCycle, setConfirmCycle] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
@@ -1373,6 +1373,36 @@ function ManageView({ data, update, reseed }) {
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch { /* fall through to copy option below */ }
     setSheetText(toTSV(rows));
+  };
+
+  const [importText, setImportText] = useState("");
+  const [importMsg, setImportMsg] = useState("");
+
+  const downloadBackup = () => {
+    try {
+      const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `franco-fit-backup-${todayISO()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch {}
+  };
+
+  const doImport = () => {
+    try {
+      const next = JSON.parse(importText);
+      if (!next || !Array.isArray(next.exercises) || typeof next.sessions !== "object") throw new Error("bad shape");
+      if (!next.unit) next.unit = data.unit || "kg";
+      restore(next);
+      setImportMsg("Restored — all data replaced from the backup.");
+      setImportText("");
+    } catch {
+      setImportMsg("That doesn't look like a valid backup. Nothing was changed.");
+    }
   };
   const [newNames, setNewNames] = useState({});
   const [editing, setEditing] = useState(null);
@@ -1548,12 +1578,25 @@ function ManageView({ data, update, reseed }) {
           </div>
         )}
         <Row style={{ marginBottom: 10 }}>
-          <button className="ll-btn" style={{ flex: 1 }} onClick={() => setShowBackup(!showBackup)}>
-            {showBackup ? "Hide backup" : "Show backup (copyable JSON)"}
+          <button className="ll-btn" style={{ flex: 1 }} onClick={downloadBackup}>Download backup (.json)</button>
+          <button className="ll-btn" style={{ flex: 1 }} onClick={() => { setShowBackup(!showBackup); setImportMsg(""); }}>
+            {showBackup ? "Hide restore" : "Restore backup"}
           </button>
         </Row>
         {showBackup && (
-          <textarea className="ll-input" readOnly rows={6} value={JSON.stringify(data)} onFocus={(e) => e.target.select()} />
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 6 }}>
+              Open a backup .json file, copy its contents, paste below. Restoring replaces everything currently in the app.
+            </div>
+            <textarea className="ll-input" rows={5} placeholder="Paste backup JSON here…" value={importText}
+              onChange={(e) => setImportText(e.target.value)} />
+            <Row style={{ marginTop: 8 }}>
+              <button className="ll-btn ll-btn-chalk" style={{ flex: 1 }} onClick={doImport}>Restore from pasted backup</button>
+            </Row>
+            {importMsg && (
+              <div style={{ color: importMsg.startsWith("Restored") ? T.pos : T.neg, fontSize: 12.5, marginTop: 6 }}>{importMsg}</div>
+            )}
+          </div>
         )}
         <div style={{ marginTop: 10 }}>
           {confirmReset ? (
@@ -1742,7 +1785,7 @@ function App() {
           <ProgressView data={data} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (
