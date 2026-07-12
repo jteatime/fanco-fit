@@ -39,6 +39,40 @@ const T = {
   amber: "#E3A93C",
   blue: "#5B9DFF",
 };
+const BASE_T = { ...T };
+const THEMES = {
+  iron: { label: "Iron", colors: {} },
+  blossom: { label: "Blossom", colors: { bg: "#191317", surface: "#231A21", surface2: "#2C2129", line: "#3B2C36", blue: "#F48FB1" } },
+  underwater: { label: "Underwater", colors: { bg: "#0E161D", surface: "#152230", surface2: "#1C2C3C", line: "#28394A", blue: "#4FC3F7" } },
+  neon: { label: "Neon", colors: { bg: "#141220", surface: "#1C1930", surface2: "#251F3E", line: "#332C52", blue: "#B388FF" } },
+  jungle: { label: "Jungle", colors: { bg: "#12160F", surface: "#1A211A", surface2: "#232C22", line: "#303C2E", blue: "#B7CFA0" } },
+};
+function applyTheme(id) {
+  const th = THEMES[id] || THEMES.iron;
+  Object.assign(T, BASE_T, th.colors);
+}
+
+const REWARDS = [
+  { id: "gold-star", char: "★", color: "#F6C851" },
+  { id: "silver-star", char: "★", color: "#C9CDD6" },
+  { id: "gold-sparkle", char: "✦", color: "#F6C851" },
+  { id: "aqua-sparkle", char: "✦", color: "#7FD8E8" },
+  { id: "pink-heart", char: "♥", color: "#F48FB1" },
+  { id: "red-heart", char: "♥", color: "#E5534B" },
+  { id: "fire", char: "🔥", color: "#FF8A3C" },
+  { id: "bolt", char: "⚡", color: "#F6C851" },
+  { id: "crown", char: "👑", color: "#F6C851" },
+  { id: "muscle", char: "💪", color: "#F6C851" },
+];
+const rewardOf = (data) => REWARDS.find((r) => r.id === (data && data.rewardId)) || REWARDS[0];
+const RewardGlyph = ({ data, size = 13 }) => {
+  const r = rewardOf(data);
+  return (
+    <span style={{ fontSize: size, lineHeight: 1, flex: "none", color: r.color, filter: `drop-shadow(0 0 5px ${r.color}99)` }}>
+      {r.char}
+    </span>
+  );
+};
 const WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
 const DAY_COLOR = {
@@ -58,7 +92,7 @@ function applySchedule(refeedDay) {
   OPTIONAL_DAYS = { [WEEK[(r + 2) % 7]]: true, [WEEK[(r + 5) % 7]]: true };
 }
 
-const CSS = `
+const buildCSS = () => `
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
 html, body { scrollbar-width: none; -ms-overflow-style: none; }
 ::-webkit-scrollbar { width: 0; height: 0; display: none; }
@@ -102,9 +136,10 @@ textarea.ll-input { resize: vertical; min-height: 44px; font-size: 15px; }
 .ll-tagchip { padding: 3px 10px; border-radius: 999px; border: 1px solid ${T.line}; background: none; color: ${T.faint}; font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .ll-tagchip.on { border-color: ${T.amber}; color: ${T.amber}; background: rgba(227,169,60,0.1); }
 .ll-star { color: #F6C851; text-shadow: 0 0 7px rgba(246,200,81,0.75); }
-.ll-resttab { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 7px 12px 8px; border-left: 1px solid ${T.line}; min-width: 106px; }
-.ll-restpill { display: flex; align-items: center; gap: 6px; background: rgba(91,157,255,0.1); border: 1px solid rgba(91,157,255,0.55); color: ${T.blue}; border-radius: 999px; padding: 6px 14px; font-weight: 700; font-size: 13px; cursor: pointer; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.09em; }
-.ll-restpill.on { background: ${T.blue}; color: #10151D; border-color: ${T.blue}; padding: 4px 6px 4px 12px; }
+.ll-workbar { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; background: ${T.bg}; padding: 10px 2px; margin: -6px 0 10px; border-bottom: 1px solid ${T.line}; }
+.ll-restpill { display: flex; align-items: center; gap: 5px; background: rgba(91,157,255,0.1); border: 1px solid rgba(91,157,255,0.55); color: ${T.blue}; border-radius: 999px; padding: 4px 11px; font-weight: 700; font-size: 12px; cursor: pointer; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.09em; }
+.ll-restpill.on { background: ${T.blue}; color: #10151D; border-color: ${T.blue}; padding: 3px 5px 3px 10px; }
+.ll-restpill.on.warn { background: ${T.amber}; border-color: ${T.amber}; color: #10151D; }
 .ll-restpill.on.long { background: ${T.neg}; border-color: ${T.neg}; color: ${T.ink}; animation: llshake 1.6s ease-in-out infinite; }
 @keyframes llshake { 0%, 50%, 100% { transform: translateX(0); } 8% { transform: translateX(-2px); } 16% { transform: translateX(2px); } 24% { transform: translateX(-2px); } 32% { transform: translateX(2px); } 40% { transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) { .ll-restpill.on.long { animation: none; } }
@@ -112,8 +147,8 @@ textarea.ll-input { resize: vertical; min-height: 44px; font-size: 15px; }
 .ll-confetti { position: fixed; border-radius: 2px; z-index: 101; pointer-events: none; opacity: 0; }
 @keyframes llburst { 0% { transform: translate(0, 0) rotate(0deg); opacity: 1; } 70% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 1; } 100% { transform: translate(var(--tx), calc(var(--ty) + 45vh)) rotate(calc(var(--rot) * 1.6)); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .ll-confetti { display: none; } }
-.ll-restmain { background: none; border: none; color: inherit; font-weight: 800; font-size: 16px; cursor: pointer; padding: 0; }
-.ll-reststop { background: rgba(0,0,0,0.2); border: none; color: inherit; width: 22px; height: 22px; border-radius: 11px; font-size: 11px; cursor: pointer; flex: none; }
+.ll-restmain { background: none; border: none; color: inherit; font-weight: 800; font-size: 14px; cursor: pointer; padding: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.ll-reststop { background: rgba(0,0,0,0.2); border: none; color: inherit; width: 18px; height: 18px; border-radius: 9px; font-size: 10px; cursor: pointer; flex: none; }
 `;
 
 /* ------------------------------------------------------------------ */
@@ -224,6 +259,8 @@ function buildSeed() {
     unit: "kg",
     userName: "",
     nameAsked: false,
+    theme: "iron",
+    rewardId: "gold-star",
     cycleNumber: 2,
     cycleName: "Cycle 2",
     cycleWeeks: 8,
@@ -467,6 +504,8 @@ function dayWeekStatus(data, d, wArg) {
   const w = wArg !== undefined ? wArg : Math.max(0, weekOfCycle(data, today));
   const sess = daySessionIn(data, d, w);
   if (sess) {
+    const finished = sess.celebrated || sess.date < today;
+    if (!finished) return "logged";
     let prev = null;
     for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
     const dv = dayVolume(sess);
@@ -479,8 +518,8 @@ function dayWeekStatus(data, d, wArg) {
   return "future";
 }
 
-function DayStatusIcon({ status, size = 8 }) {
-  if (status === "star") return <span className="ll-star" style={{ fontSize: size + 5, lineHeight: 1, flex: "none" }}>★</span>;
+function DayStatusIcon({ status, size = 8, data }) {
+  if (status === "star") return <RewardGlyph data={data} size={size + 5} />;
   if (status === "missed") return <span style={{ color: T.faint, fontSize: size + 2, lineHeight: 1, flex: "none" }}>✕</span>;
   const st = { width: size, height: size, borderRadius: size, flex: "none", display: "inline-block" };
   if (status === "down") return <span style={{ ...st, background: T.neg }} />;
@@ -520,11 +559,13 @@ function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
         <input className="ll-input ll-setnum" style={{ width: 78, ...dim }} inputMode="decimal" value={set.w} aria-label="weight" placeholder={unit || "kg"} disabled={!!set.skipped}
           onChange={(e) => onChange({ ...set, w: e.target.value })} />
         <span style={{ color: T.faint, fontSize: 13 }}>×</span>
-        <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="minus 1 rep" onClick={() => onChange({ ...set, r: Math.max(0, num(set.r) - 1) })}>−</button>
+        <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="minus 1 rep"
+          onClick={() => onChange({ ...set, r: num(set.r) > 0 ? num(set.r) - 1 : Math.max(0, (target || repGoal || 1) - 1) })}>−</button>
         <input className={`ll-input ll-setnum ll-reps ${repsCls}`} style={dim} inputMode="numeric" value={set.r} aria-label="reps" disabled={!!set.skipped}
           placeholder={target ? `${target}+` : repGoal ? String(repGoal) : "reps"}
           onChange={(e) => onChange({ ...set, r: e.target.value })} />
-        <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="plus 1 rep" onClick={() => onChange({ ...set, r: num(set.r) + 1 })}>+</button>
+        <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="plus 1 rep"
+          onClick={() => onChange({ ...set, r: num(set.r) > 0 ? num(set.r) + 1 : (target || repGoal || 1) })}>+</button>
         <button onClick={() => onChange({ ...set, w: "", r: "", tag: "", skipped: false, skipNote: "" })} aria-label="clear set" title="clear set"
           style={{ background: "none", border: "none", color: T.muted, fontSize: 16, cursor: "pointer", padding: "0 3px" }}>⌫</button>
         {set.extra ? (
@@ -565,7 +606,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
   const [machineName, setMachineName] = useState("");
   const [swapping, setSwapping] = useState(false);
   const [swapText, setSwapText] = useState("");
-  const [removeArm, setRemoveArm] = useState(false);
+  const [removeArm, setRemoveArm] = useState(null);
 
   const session = data.sessions[sessionKey];
   const sessionDate = sessionKey.split("|")[0];
@@ -626,27 +667,22 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
       e.sets.push({ w: lastWeighted ? lastWeighted.w : "", r: "", extra: true, tag: "" });
     });
 
-  const copyLast = () =>
-    update((d) => {
-      const e = ensureEntry(d);
-      if (lastSame) e.sets = lastSame.entry.sets.map((s) => ({ extra: false, tag: "", ...s }));
-    });
-
   const todaySets = entry ? entry.sets : [];
-  const hasLogged = todaySets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
+  const skippedAll = !!(entry && entry.skippedAll);
+  const hasLogged = !skippedAll && todaySets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
   const plannedToday = todaySets.filter((s) => !s.extra);
   const exTotal = Math.max(plannedToday.length, ex.targetSets || 3);
   const plannedFilled = plannedToday.filter((s) => num(s.r) > 0 || s.skipped).length;
   const extraFilled = todaySets.filter((s) => s.extra && num(s.r) > 0).length;
-  const exFilled = plannedFilled + extraFilled;
-  const exComplete = plannedFilled >= exTotal;
+  const exFilled = skippedAll ? exTotal : plannedFilled + extraFilled;
+  const exComplete = skippedAll || plannedFilled >= exTotal;
   const todayVol = volumeOf(todaySets);
   const lastVol = lastSame ? volumeOf(lastSame.entry.sets) : 0;
   const liveDelta = hasLogged && lastSame ? pct(lastVol, todayVol) : null;
   const beating = exComplete && liveDelta !== null && liveDelta > 0;
   const stripColor = !exComplete
     ? T.line
-    : beating ? T.pos : liveDelta !== null && liveDelta < 0 ? T.neg : T.amber;
+    : skippedAll ? "#565B63" : beating ? T.pos : liveDelta !== null && liveDelta < 0 ? T.neg : T.amber;
 
   const bodyweight = lastSame && volumeOf(lastSame.entry.sets) === 0 && repsOf(lastSame.entry.sets) > 0;
 
@@ -659,6 +695,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
             <span style={{ width: 4, alignSelf: "stretch", minHeight: 20, borderRadius: 2, background: stripColor, flex: "none", boxShadow: beating ? "0 0 8px rgba(105,181,109,0.7)" : "none" }} />
             <div style={{ minWidth: 0 }}>
               <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>
+                {ex.icon ? <span style={{ marginRight: 7 }}>{ex.icon}</span> : null}
                 {entry && entry.swapName ? entry.swapName : ex.name}
                 {entry && entry.swapName ? (
                   <span style={{ color: T.amber, fontSize: 12, marginLeft: 8, fontFamily: "Barlow" }}>swapped</span>
@@ -672,9 +709,18 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
           </Row>
           <Row style={{ gap: 8, flex: "none" }}>
             {exTotal > 0 && (
-              <span className="ll-num" style={{ color: exComplete ? T.pos : T.faint, fontSize: 12, fontWeight: 700 }}>
-                {exFilled}/{exTotal}{exComplete ? " ✓" : ""}
-              </span>
+              <Row style={{ gap: 3, flex: "none" }} aria-label={`${exFilled} of ${exTotal} sets done`}>
+                {Array.from({ length: exTotal }, (_, i) => {
+                  const s2 = plannedToday[i];
+                  const fill = skippedAll ? "#565B63" : s2 && num(s2.r) > 0 ? T.pos : s2 && s2.skipped ? "#565B63" : null;
+                  return (
+                    <span key={i} style={{ width: 9, height: 9, borderRadius: 2, flex: "none", background: fill || "transparent", border: fill ? "none" : `1px solid ${T.line}` }} />
+                  );
+                })}
+                {todaySets.filter((s2) => s2.extra && num(s2.r) > 0).map((s2, i) => (
+                  <span key={"x" + i} style={{ width: 9, height: 9, borderRadius: 2, flex: "none", background: T.amber }} />
+                ))}
+              </Row>
             )}
             {lastSame && lastSame.entry.note && <span title="note last time" style={{ color: T.amber, fontSize: 14 }}>●</span>}
             <span style={{ color: T.faint, fontSize: 13 }}>{open ? "▾" : "▸"}</span>
@@ -732,6 +778,24 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                   })
                 }>
                 <VariantDot index={i} /> {v.name}
+                {v.id !== "main" && (
+                  <span aria-label={`remove ${v.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (removeArm !== v.id) { setRemoveArm(v.id); setTimeout(() => setRemoveArm(null), 3000); return; }
+                      update((d) => {
+                        const dex = d.exercises.find((x) => x.id === ex.id);
+                        dex.variants = dex.variants.filter((vv) => vv.id !== v.id);
+                        if (dex.activeVariant === v.id) dex.activeVariant = "main";
+                        const sN = d.sessions[sessionKey];
+                        if (sN && sN.entries[ex.id] && sN.entries[ex.id].variantId === v.id) sN.entries[ex.id].variantId = "main";
+                      });
+                      setRemoveArm(null);
+                    }}
+                    style={{ color: removeArm === v.id ? T.neg : T.faint, fontWeight: 700, marginLeft: 3, padding: "0 2px", fontSize: 12 }}>
+                    {removeArm === v.id ? "✕?" : "✕"}
+                  </span>
+                )}
               </button>
             ))}
             {addingMachine ? (
@@ -757,58 +821,54 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
             )}
           </div>
 
-          {variantId !== "main" && (
-            <Row style={{ marginTop: -4, marginBottom: 10 }}>
-              <button
-                style={{ background: "none", border: "none", color: removeArm ? T.neg : T.faint, fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit", fontWeight: 600 }}
-                onClick={() => {
-                  if (!removeArm) { setRemoveArm(true); setTimeout(() => setRemoveArm(false), 3000); return; }
-                  update((d) => {
-                    const dex = d.exercises.find((x) => x.id === ex.id);
-                    dex.variants = dex.variants.filter((v) => v.id !== variantId);
-                    dex.activeVariant = "main";
-                    const sN = d.sessions[sessionKey];
-                    if (sN && sN.entries[ex.id] && sN.entries[ex.id].variantId === variantId) sN.entries[ex.id].variantId = "main";
-                  });
-                  setRemoveArm(false);
-                }}>
-                {removeArm ? "Tap again to remove this machine — its history stays saved" : "✕ Remove this machine"}
-              </button>
-            </Row>
-          )}
 
           {/* today's sets */}
-          {todaySets.length > 0 && (
-            <Row style={{ justifyContent: "center", gap: 6, margin: "2px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-              <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
-            </Row>
-          )}
-          {(() => {
-            const lastLogged = lastSame
-              ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
-              : [];
-            return todaySets.map((s, i) => (
-              <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
-                compareSet={!s.extra ? lastLogged[i] : undefined}
-                onChange={(ns) => changeSet(i, ns)}
-                onRemove={() => update((d) => { ensureEntry(d).sets.splice(i, 1); })} />
-            ));
-          })()}
+          {skippedAll ? (
+            <div style={{ margin: "2px 0 10px" }}>
+              <div className="ll-note" style={{ background: "rgba(86,91,100,0.16)", borderColor: T.line, color: T.muted }}>
+                Skipped today — add a reason in the note below if you want.
+              </div>
+              <button className="ll-btn ll-btn-sm" style={{ marginTop: 8 }}
+                onClick={() => update((d) => { ensureEntry(d).skippedAll = false; })}>
+                Undo — do this exercise
+              </button>
+            </div>
+          ) : (
+            <>
+              {todaySets.length > 0 && (
+                <Row style={{ justifyContent: "center", gap: 6, margin: "2px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
+                  <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+                </Row>
+              )}
+              {(() => {
+                const lastLogged = lastSame
+                  ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
+                  : [];
+                return todaySets.map((s, i) => (
+                  <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
+                    compareSet={!s.extra ? lastLogged[i] : undefined}
+                    onChange={(ns) => changeSet(i, ns)}
+                    onRemove={() => update((d) => { ensureEntry(d).sets.splice(i, 1); })} />
+                ));
+              })()}
 
-          <Row style={{ marginTop: 4, marginBottom: 10 }}>
-            {lastSame && !hasLogged && (
-              <button className="ll-btn ll-btn-chalk" style={{ flex: 1 }} onClick={copyLast}>Copy last time</button>
-            )}
-            <button className="ll-btn" style={{ flex: 1 }} onClick={addExtraSet}>+ Extra set</button>
-          </Row>
+              <Row style={{ marginTop: 4, marginBottom: 10 }}>
+                <button className="ll-btn" style={{ flex: 1 }} onClick={addExtraSet}>+ Extra set</button>
+                <button className="ll-btn" style={{ flex: 1, color: T.muted }}
+                  onClick={() => update((d) => { ensureEntry(d).skippedAll = true; })}>
+                  Skip all sets
+                </button>
+              </Row>
 
-          {hasLogged && (
-            <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
-              <span style={{ color: T.muted, fontSize: 13 }}>
-                Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> vol
-              </span>
-              <Delta value={liveDelta} />
-            </Row>
+              {hasLogged && (
+                <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ color: T.muted, fontSize: 13 }}>
+                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> vol
+                  </span>
+                  <Delta value={liveDelta} />
+                </Row>
+              )}
+            </>
           )}
 
           {/* note */}
@@ -943,7 +1003,7 @@ const CELEBRATIONS = [
   "You look like you need protein, hydration, and several inches in bed",
 ];
 
-function Celebration({ msg, refeed, onClose }) {
+function Celebration({ msg, refeed, reward, onClose }) {
   const pieces = useMemo(
     () =>
       Array.from({ length: 140 }, (_, i) => {
@@ -977,7 +1037,7 @@ function Celebration({ msg, refeed, onClose }) {
           animation: `llburst ${p.dur}s cubic-bezier(0.16, 0.9, 0.35, 1) ${p.delay}s forwards`,
         }} />
       ))}
-      <span className="ll-star" style={{ fontSize: 46, lineHeight: 1 }}>★</span>
+      <span style={{ fontSize: 46, lineHeight: 1, color: (reward && reward.color) || "#F6C851", filter: `drop-shadow(0 0 9px ${((reward && reward.color) || "#F6C851")}99)` }}>{(reward && reward.char) || "★"}</span>
       <div className="ll-display" style={{ fontSize: 38, fontWeight: 700, marginTop: 12, lineHeight: 1.1 }}>{msg}</div>
       {refeed && (
         <div className="ll-display" style={{ fontSize: 22, fontWeight: 600, color: T.amber, marginTop: 14 }}>
@@ -993,6 +1053,7 @@ function Celebration({ msg, refeed, onClose }) {
 /* Today view                                                          */
 /* ------------------------------------------------------------------ */
 function TodayView({ data, update, day, setDay }) {
+  const rw = rewardOf(data);
   const [weekOffset, setWeekOffset] = useState(0);
   const curWeek = Math.max(0, weekOfCycle(data, todayISO()));
   const maxWeek = Math.max((data.cycleWeeks || 8) - 1, curWeek);
@@ -1017,21 +1078,39 @@ function TodayView({ data, update, day, setDay }) {
   exList.forEach((ex) => {
     const e = sess && sess.entries[ex.id];
     const planned = e ? e.sets.filter((s) => !s.extra) : [];
-    totalSets += Math.max(planned.length, ex.targetSets || 3);
-    filledSets += planned.filter((s) => num(s.r) > 0 || s.skipped).length;
+    const expected = Math.max(planned.length, ex.targetSets || 3);
+    totalSets += expected;
+    filledSets += e && e.skippedAll ? expected : planned.filter((s) => num(s.r) > 0 || s.skipped).length;
   });
   const complete = exList.length > 0 && totalSets > 0 && filledSets >= totalSets;
+
+  const started = !!(sess && (sess.startedAt || Object.values(sess.entries).some(entryHasData)));
+
+  const startWorkout = () =>
+    update((d) => {
+      if (!d.sessions[sessionKey]) d.sessions[sessionKey] = { date: sessionKey.split("|")[0], day, entries: {} };
+      d.sessions[sessionKey].startedAt = Date.now();
+    });
 
   const fireCelebration = () => {
     const who = (data.userName || "champ").trim();
     const msg = CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)].replace(/\{name\}/g, who);
-    setCelebration({ msg, refeed: day === "Friday" });
-    update((d) => { if (d.sessions[sessionKey]) d.sessions[sessionKey].celebrated = true; });
+    const preRefeed = data.refeedDay
+      ? day === WEEK[(WEEK.indexOf(data.refeedDay) + 6) % 7]
+      : day === "Friday";
+    setCelebration({ msg, refeed: preRefeed, reward: rewardOf(data) });
+    update((d) => {
+      if (d.sessions[sessionKey]) {
+        d.sessions[sessionKey].celebrated = true;
+        d.sessions[sessionKey].finishedAt = Date.now();
+      }
+    });
   };
 
   return (
     <div>
       {celebration && <Celebration {...celebration} onClose={() => setCelebration(null)} />}
+      {weekOffset === 0 && started && !(sess && sess.celebrated) && <WorkoutBar startedAt={sess && sess.startedAt} />}
       <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
         <button className="ll-chip ll-day" disabled={wIdx <= 0} aria-label="previous week"
           style={{ opacity: wIdx <= 0 ? 0.35 : 1 }}
@@ -1039,8 +1118,10 @@ function TodayView({ data, update, day, setDay }) {
         {DAYS.map((d) => {
           const st = dayWeekStatus(data, d, wIdx);
           return (
-            <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
-              <DayStatusIcon status={st} size={7} />
+            <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`}
+              style={st === "star" ? { borderColor: `${rw.color}8C`, background: `${rw.color}12`, boxShadow: `0 0 9px ${rw.color}59` } : {}}
+              onClick={() => setDay(d)}>
+              <DayStatusIcon status={st} size={7} data={data} />
               {DAYS.length > 4 ? d.slice(0, 1) : d.slice(0, 3)}
             </button>
           );
@@ -1059,24 +1140,44 @@ function TodayView({ data, update, day, setDay }) {
           </div>
         </div>
       </Row>
+      {weekOffset === 0 && !started && !(sess && sess.celebrated) && exList.length > 0 && (
+        <button onClick={startWorkout}
+          style={{
+            width: "100%", padding: 14, marginBottom: 12, fontSize: 15, fontWeight: 700,
+            borderRadius: 12, cursor: "pointer", fontFamily: "inherit",
+            background: "rgba(91,157,255,0.12)", border: "1px solid rgba(91,157,255,0.55)", color: T.blue,
+          }}>
+          ▶ Start Workout
+        </button>
+      )}
       {exList.map((ex) => (
         <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} />
       ))}
       {exList.length > 0 && weekOffset === 0 && (() => {
         const done = !!(sess && sess.celebrated);
         const ready = complete && !done;
+        const pctFill = totalSets > 0 ? Math.min(1, filledSets / totalSets) * 100 : 0;
+        const durMin = sess && sess.startedAt && sess.finishedAt
+          ? Math.max(1, Math.round((sess.finishedAt - sess.startedAt) / 60000))
+          : null;
         return (
           <button disabled={!ready} onClick={fireCelebration}
             style={{
               width: "100%", padding: 14, marginTop: 4, fontSize: 15, fontWeight: 700,
               borderRadius: 12, cursor: ready ? "pointer" : "default", fontFamily: "inherit",
-              background: ready ? T.pos : done ? "rgba(105,181,109,0.15)" : T.surface2,
+              background: ready
+                ? T.pos
+                : done
+                  ? "rgba(105,181,109,0.15)"
+                  : `linear-gradient(90deg, rgba(105,181,109,0.3) ${pctFill}%, ${T.surface2} ${pctFill}%)`,
               border: `1px solid ${ready ? T.pos : done ? "rgba(105,181,109,0.45)" : T.line}`,
               color: ready ? "#0F1512" : done ? T.pos : T.faint,
               opacity: ready || done ? 1 : 0.65,
               boxShadow: ready ? "0 0 12px rgba(105,181,109,0.4)" : "none",
             }}>
-            {done ? "★ Workout finished" : ready ? "Finish Workout" : `Finish Workout · ${filledSets}/${totalSets} sets`}
+            {done
+            ? `${rewardOf(data).char} Workout finished${durMin ? ` · ${durMin} min` : ""}`
+            : ready ? "Finish Workout" : `Finish Workout · ${filledSets}/${totalSets} sets`}
           </button>
         );
       })()}
@@ -1100,6 +1201,7 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
   const curWeek = Math.max(0, weekOfCycle(data, today));
   const weeks = Math.max(data.cycleWeeks || 8, curWeek + 1);
   const cols = Array.from({ length: weeks }, (_, w) => w);
+  const rw = rewardOf(data);
   const monthOf = (w) =>
     new Date(addDays(data.cycleStart, w * 7) + "T12:00:00").toLocaleDateString("en-US", { month: "short" });
   const domOf = (w) => new Date(addDays(data.cycleStart, w * 7) + "T12:00:00").getDate();
@@ -1149,13 +1251,16 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                   for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
                   const dv = dayVolume(sess);
                   const pv = prev ? dayVolume(prev) : null;
-                  if (pv !== null && dv > pv) {
-                    content = "★";
+                  const finishedCell = sess.celebrated || sess.date < today;
+                  if (!finishedCell) {
+                    content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.pos, display: "inline-block" }} />;
+                  } else if (pv !== null && dv > pv) {
+                    content = rw.char;
                     style.fontSize = 13;
-                    style.color = "#F6C851";
-                    style.textShadow = "0 0 7px rgba(246,200,81,0.75)";
-                    style.background = "rgba(246,200,81,0.1)";
-                    style.border = "1px solid rgba(246,200,81,0.4)";
+                    style.color = rw.color;
+                    style.filter = `drop-shadow(0 0 5px ${rw.color}99)`;
+                    style.background = `${rw.color}1A`;
+                    style.border = `1px solid ${rw.color}66`;
                   } else if (pv !== null && dv < pv) {
                     content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.neg, display: "inline-block" }} />;
                   } else {
@@ -1177,6 +1282,10 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                 } else {
                   style.opacity = 0.35;
                 }
+                if (dateIso === today) {
+                  style.border = `2px solid ${T.blue}`;
+                  if (!onClick) { style.cursor = "pointer"; onClick = () => onGoToday(d); }
+                }
                 return (
                   <button key={w} style={style} onClick={onClick} disabled={!onClick}
                     title={`${d} · ${fmtDate(dateIso)}`}
@@ -1190,7 +1299,7 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
         </div>
       </div>
       <Row style={{ gap: 12, marginTop: 9, flexWrap: "wrap" }}>
-        <Row style={{ gap: 5 }}><span className="ll-star" style={{ fontSize: 12 }}>★</span><span style={{ fontSize: 10.5, color: T.faint }}>beat prev week</span></Row>
+        <Row style={{ gap: 5 }}><RewardGlyph data={data} size={12} /><span style={{ fontSize: 10.5, color: T.faint }}>beat prev week</span></Row>
         <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, background: T.neg, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>vol down</span></Row>
         <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, background: T.pos, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>logged</span></Row>
         <Row style={{ gap: 5 }}><span style={{ fontSize: 10.5, color: T.faint }}>✕ missed</span></Row>
@@ -1204,6 +1313,7 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
 }
 
 function ProgressView({ data, day, setDay, onGoToday }) {
+  const rw = rewardOf(data);
   const [openEx, setOpenEx] = useState(null);
   const [openDayKey, setOpenDayKey] = useState(null);
 
@@ -1243,6 +1353,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <Row style={{ justifyContent: "space-between", marginBottom: 4 }}>
                     <span className="ll-display" style={{ fontSize: 16, fontWeight: 600 }}>
+                      {ex.icon ? <span style={{ marginRight: 6 }}>{ex.icon}</span> : null}
                       {e.swapName || ex.name}
                       {e.swapName ? <span style={{ color: T.amber, fontSize: 11.5, marginLeft: 6, fontFamily: "Barlow" }}>swapped</span> : null}
                     </span>
@@ -1330,8 +1441,10 @@ function ProgressView({ data, day, setDay, onGoToday }) {
         {DAYS.map((d) => {
           const st = dayWeekStatus(data, d);
           return (
-            <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
-              <DayStatusIcon status={st} size={7} />
+            <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`}
+              style={st === "star" ? { borderColor: `${rw.color}8C`, background: `${rw.color}12`, boxShadow: `0 0 9px ${rw.color}59` } : {}}
+              onClick={() => setDay(d)}>
+              <DayStatusIcon status={st} size={7} data={data} />
               {DAYS.length > 4 ? d.slice(0, 1) : d.slice(0, 3)}
             </button>
           );
@@ -1358,7 +1471,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
           <div key={ex.id} className="ll-card" style={{ padding: "12px 14px", cursor: "pointer" }} onClick={() => setOpenEx(ex.id)}>
             <Row style={{ justifyContent: "space-between" }}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div className="ll-display" style={{ fontSize: 17, fontWeight: 600 }}>{ex.name}</div>
+                <div className="ll-display" style={{ fontSize: 17, fontWeight: 600 }}>{ex.icon ? ex.icon + " " : ""}{ex.name}</div>
                 <Row style={{ gap: 3, marginTop: 8, alignItems: "flex-end", height: 26 }}>
                   {mini.map((h, i) => {
                     const same = last && h.entry.variantId === last.entry.variantId;
@@ -1495,6 +1608,31 @@ function ManageView({ data, update, reseed, restore }) {
         </div>
       )}
 
+      {/* Style */}
+      <div className="ll-card" style={{ padding: 14 }}>
+        <div className="ll-display" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Style</div>
+        <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 6 }}>Theme</div>
+        <Row style={{ gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
+          {Object.entries(THEMES).map(([id, th]) => (
+            <button key={id} className={`ll-chip ll-day ${(data.theme || "iron") === id ? "on" : ""}`}
+              style={(data.theme || "iron") === id ? { borderColor: T.blue, color: T.blue } : {}}
+              onClick={() => { update((d) => { d.theme = id; }); applyTheme(id); }}>
+              {th.label}
+            </button>
+          ))}
+        </Row>
+        <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 6 }}>Win icon</div>
+        <Row style={{ gap: 5, flexWrap: "wrap" }}>
+          {REWARDS.map((r) => (
+            <button key={r.id} className={`ll-chip ll-day ${rewardOf(data).id === r.id ? "on" : ""}`}
+              style={{ color: r.color, fontSize: 15, ...(rewardOf(data).id === r.id ? { borderColor: r.color, boxShadow: `0 0 8px ${r.color}59` } : {}) }}
+              onClick={() => update((d) => { d.rewardId = r.id; })}>
+              {r.char}
+            </button>
+          ))}
+        </Row>
+      </div>
+
       {/* Name */}
       <div className="ll-card" style={{ padding: 14 }}>
         <div className="ll-display" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Name</div>
@@ -1564,6 +1702,8 @@ function ManageView({ data, update, reseed, restore }) {
               {editing === ex.id ? (
                 <div style={{ flex: 1 }}>
                   <Row>
+                    <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
+                      value={ex.icon || ""} onChange={(e) => update((d) => { d.exercises.find((x) => x.id === ex.id).icon = e.target.value; })} />
                     <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
                     <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
                       const t = editText.trim();
@@ -1583,7 +1723,7 @@ function ManageView({ data, update, reseed, restore }) {
               ) : (
                 <>
                   <span style={{ fontSize: 15 }}>
-                    {ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
+                    {ex.icon ? ex.icon + " " : ""}{ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
                   </span>
                   <Row style={{ gap: 4 }}>
                     <button className="ll-btn ll-btn-sm" disabled={i === 0} style={{ opacity: i === 0 ? 0.35 : 1 }}
@@ -1697,20 +1837,43 @@ function RestTimer() {
   const secs = startTs ? Math.floor((Date.now() - startTs) / 1000) : 0;
   const m = Math.floor(secs / 60);
   const s = String(secs % 60).padStart(2, "0");
+  const warn = secs >= 75 && secs < 90;
   const long = secs >= 90;
 
+  return startTs ? (
+    <div className={`ll-restpill on ${long ? "long" : warn ? "warn" : ""}`}>
+      <button className="ll-restmain" onClick={() => setStartTs(Date.now())} aria-label="restart rest timer">
+        {m}:{s}
+      </button>
+      <button className="ll-reststop" aria-label="stop rest timer" onClick={() => setStartTs(null)}>✕</button>
+    </div>
+  ) : (
+    <button className="ll-restpill" onClick={() => setStartTs(Date.now())} aria-label="start rest timer">⏱ REST</button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sticky workout bar — elapsed time + rest timer, pinned while active */
+/* ------------------------------------------------------------------ */
+function WorkoutBar({ startedAt }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  let label = null;
+  if (startedAt) {
+    const secs = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), sc = String(secs % 60).padStart(2, "0");
+    label = h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sc}` : `${m}:${sc}`;
+  }
   return (
-    <div className="ll-resttab">
-      {startTs ? (
-        <div className={`ll-restpill on ${long ? "long" : ""}`}>
-          <button className="ll-restmain ll-num" onClick={() => setStartTs(Date.now())} aria-label="restart rest timer">
-            {m}:{s}
-          </button>
-          <button className="ll-reststop" aria-label="stop rest timer" onClick={() => setStartTs(null)}>✕</button>
-        </div>
-      ) : (
-        <button className="ll-restpill" onClick={() => setStartTs(Date.now())} aria-label="start rest timer">⏱ REST</button>
-      )}
+    <div className="ll-workbar">
+      <Row style={{ gap: 8 }}>
+        <span style={{ fontSize: 11, letterSpacing: "0.1em", color: T.faint, textTransform: "uppercase" }}>Workout</span>
+        {label && <span className="ll-num" style={{ fontSize: 16, fontWeight: 700 }}>{label}</span>}
+      </Row>
+      <RestTimer />
     </div>
   );
 }
@@ -1748,7 +1911,6 @@ const window_storage = {
   async set(k, v) { localStorage.setItem(k, v); return { key: k, value: v }; },
 };
 
-/* Version A starts fresh with Alicia's routine */
 function freshSeed() {
   const d = buildSeed();
   d.sessions = {};
@@ -1759,6 +1921,7 @@ function freshSeed() {
   d.userName = "Alicia";
   d.nameAsked = true;
   d.refeedDay = "Saturday";
+  d.rewardId = "pink-heart";
   return d;
 }
 
@@ -1783,7 +1946,10 @@ function App() {
           if (!parsed.cycleName) parsed.cycleName = `Cycle ${parsed.cycleNumber || 1}`;
           if (parsed.userName === undefined) { parsed.userName = ""; parsed.nameAsked = false; }
           if (REFEED_ROTATION && !parsed.refeedDay) parsed.refeedDay = "Saturday";
+          if (!parsed.theme) parsed.theme = "iron";
+          if (!parsed.rewardId) parsed.rewardId = "gold-star";
           applySchedule(parsed.refeedDay);
+          applyTheme(parsed.theme);
           setData(parsed);
           return;
         }
@@ -1791,6 +1957,7 @@ function App() {
       } catch {
         const seed = freshSeed();
         applySchedule(seed.refeedDay);
+        applyTheme(seed.theme);
         setData(seed);
         try { await window_storage.set(STORAGE_KEY, JSON.stringify(seed)); }
         catch { setLoadError(true); }
@@ -1823,6 +1990,7 @@ function App() {
   const reseed = () => {
     const seed = freshSeed();
     applySchedule(seed.refeedDay);
+    applyTheme(seed.theme);
     setData(seed);
     scheduleSave(seed);
   };
@@ -1830,7 +1998,7 @@ function App() {
   if (!data) {
     return (
       <div className="ll-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
-        <style>{CSS}</style>
+        <style>{buildCSS()}</style>
         <span className="ll-display" style={{ color: T.muted, fontSize: 18, letterSpacing: "0.15em" }}>LOADING…</span>
       </div>
     );
@@ -1838,7 +2006,7 @@ function App() {
 
   return (
     <div className="ll-root">
-      <style>{CSS}</style>
+      <style>{buildCSS()}</style>
       <div className="ll-shell">
         <Row style={{ justifyContent: "space-between", padding: "18px 0 14px" }}>
           <Row style={{ gap: 10, alignItems: "baseline" }}>
@@ -1848,7 +2016,7 @@ function App() {
             </span>
           </Row>
           <span style={{ fontSize: 11.5, color: saveState === "error" ? T.neg : T.faint }} className="ll-num">
-            {saveState === "saving" ? "saving…" : saveState === "error" ? "save failed — retry by editing" : "saved"}
+            {saveState === "saving" ? "saving…" : saveState === "error" ? "save failed" : "saved"}
           </span>
         </Row>
         {loadError && <div className="ll-note" style={{ marginBottom: 10 }}>This browser is blocking storage — logs won't persist. Avoid private/incognito mode.</div>}
@@ -1857,7 +2025,7 @@ function App() {
           <ProgressView data={data} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { applySchedule(next.refeedDay); setData(next); scheduleSave(next); }} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (
@@ -1866,7 +2034,6 @@ function App() {
             <div className="ll-tabline" />
           </button>
         ))}
-        <RestTimer />
       </nav>
     </div>
   );
