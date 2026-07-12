@@ -52,6 +52,8 @@ const OPTIONAL_DAYS = {};
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
+html, body { scrollbar-width: none; -ms-overflow-style: none; }
+::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .ll-root { min-height: 100vh; background: ${T.bg}; color: ${T.ink}; font-family: 'Barlow', -apple-system, 'Segoe UI', sans-serif; font-size: 15px; }
 .ll-shell { max-width: 480px; margin: 0 auto; padding: 0 14px 96px; }
 .ll-display { font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; letter-spacing: 0.04em; }
