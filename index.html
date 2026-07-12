@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#141518" />
 <title>Franco Fit</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="manifest" href="manifest.webmanifest" />
@@ -15,12 +12,15 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <meta name="apple-mobile-web-app-title" content="Franco Fit" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <style>html, body { margin: 0; background: #141518; }</style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-/* FRANCO FIT — VERSION A (Alicia) — standalone build */
+/* FRANCO FIT — VERSION A (Alicia) — standalone GitHub build */
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ------------------------------------------------------------------ */
@@ -39,17 +39,24 @@ const T = {
   amber: "#E3A93C",
   blue: "#5B9DFF",
 };
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sunday"];
-const DAY_NUM = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Sunday: 0 };
+const WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAY_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
 const DAY_COLOR = {
-  Monday: "#B08BD0",
-  Tuesday: "#CE5148",
-  Wednesday: "#5480C8",
-  Thursday: "#8B8F98",
-  Friday: "#E3A93C",
-  Sunday: "#5AA35F",
+  Sunday: "#5AA35F", Monday: "#B08BD0", Tuesday: "#CE5148", Wednesday: "#5480C8",
+  Thursday: "#8B8F98", Friday: "#E3A93C", Saturday: "#6FA8A0",
 };
-const OPTIONAL_DAYS = { Monday: true, Thursday: true };
+const REFEED_ROTATION = true;
+let DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sunday"];
+let OPTIONAL_DAYS = { Monday: true, Thursday: true };
+/* Rotate the training week around the refeed day:
+   day after = heavy, 2nd & 5th = optional, day before = lightest */
+function applySchedule(refeedDay) {
+  if (!REFEED_ROTATION || !refeedDay) return;
+  const r = WEEK.indexOf(refeedDay);
+  DAYS = WEEK.filter((d) => d !== refeedDay)
+    .sort((a, b) => ((DAY_NUM[a] + 6) % 7) - ((DAY_NUM[b] + 6) % 7));
+  OPTIONAL_DAYS = { [WEEK[(r + 2) % 7]]: true, [WEEK[(r + 5) % 7]]: true };
+}
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
@@ -277,9 +284,8 @@ const entryHasData = (e) => e && e.sets && e.sets.some((s) => !s.skipped && (num
 
 function defaultDay() {
   const jd = new Date().getDay();
-  if (Object.values(DAY_NUM).includes(jd)) {
-    return DAYS.find((d) => DAY_NUM[d] === jd);
-  }
+  const exact = DAYS.find((d) => DAY_NUM[d] === jd);
+  if (exact) return exact;
   let best = DAYS[0], bestGap = 8;
   for (const d of DAYS) {
     const gap = (DAY_NUM[d] - jd + 7) % 7;
@@ -559,6 +565,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
   const [machineName, setMachineName] = useState("");
   const [swapping, setSwapping] = useState(false);
   const [swapText, setSwapText] = useState("");
+  const [removeArm, setRemoveArm] = useState(false);
 
   const session = data.sessions[sessionKey];
   const sessionDate = sessionKey.split("|")[0];
@@ -749,6 +756,26 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
               <button className="ll-chip" onClick={() => setAddingMachine(true)}>+ machine</button>
             )}
           </div>
+
+          {variantId !== "main" && (
+            <Row style={{ marginTop: -4, marginBottom: 10 }}>
+              <button
+                style={{ background: "none", border: "none", color: removeArm ? T.neg : T.faint, fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit", fontWeight: 600 }}
+                onClick={() => {
+                  if (!removeArm) { setRemoveArm(true); setTimeout(() => setRemoveArm(false), 3000); return; }
+                  update((d) => {
+                    const dex = d.exercises.find((x) => x.id === ex.id);
+                    dex.variants = dex.variants.filter((v) => v.id !== variantId);
+                    dex.activeVariant = "main";
+                    const sN = d.sessions[sessionKey];
+                    if (sN && sN.entries[ex.id] && sN.entries[ex.id].variantId === variantId) sN.entries[ex.id].variantId = "main";
+                  });
+                  setRemoveArm(false);
+                }}>
+                {removeArm ? "Tap again to remove this machine — its history stays saved" : "✕ Remove this machine"}
+              </button>
+            </Row>
+          )}
 
           {/* today's sets */}
           {todaySets.length > 0 && (
@@ -979,6 +1006,11 @@ function TodayView({ data, update, day, setDay }) {
   const sess = data.sessions[sessionKey];
   const [celebration, setCelebration] = useState(null);
 
+  useEffect(() => {
+    if (!DAYS.includes(day)) setDay(defaultDay());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.refeedDay, day]);
+
   /* Completion: every planned set of every exercise is filled or skipped —
      an exercise with a missing entry or missing rows counts its full target */
   let totalSets = 0, filledSets = 0;
@@ -1009,7 +1041,7 @@ function TodayView({ data, update, day, setDay }) {
           return (
             <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
               <DayStatusIcon status={st} size={7} />
-              {d.slice(0, 1)}
+              {DAYS.length > 4 ? d.slice(0, 1) : d.slice(0, 3)}
             </button>
           );
         })}
@@ -1195,7 +1227,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
           Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
           {prev ? ` · vs week ${weekOfCycle(data, prev.date) + 1}` : ""}
         </div>
-        {data.exercises.filter((e) => e.day === d).map((ex) => {
+        {data.exercises.filter((ex) => sess.entries[ex.id]).map((ex) => {
           const e = sess.entries[ex.id];
           if (!entryHasData(e)) return null;
           const vName = (ex.variants.find((v) => v.id === e.variantId) || {}).name || "";
@@ -1300,7 +1332,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
           return (
             <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
               <DayStatusIcon status={st} size={7} />
-              {d.slice(0, 1)}
+              {DAYS.length > 4 ? d.slice(0, 1) : d.slice(0, 3)}
             </button>
           );
         })}
@@ -1431,6 +1463,37 @@ function ManageView({ data, update, reseed, restore }) {
   return (
     <div>
       <div className="ll-display" style={{ fontSize: 26, fontWeight: 700, marginBottom: 12 }}>Manage</div>
+
+      {/* Refeed day */}
+      {data.refeedDay && (
+        <div className="ll-card" style={{ padding: 14 }}>
+          <div className="ll-display" style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Refeed day</div>
+          <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 10 }}>
+            The whole week rotates around it — heavy day right after, optional days 2nd and 5th, lightest day right before.
+          </div>
+          <Row style={{ gap: 5, flexWrap: "wrap" }}>
+            {WEEK.map((w) => (
+              <button key={w} className={`ll-chip ll-day ${data.refeedDay === w ? "on" : ""}`}
+                style={data.refeedDay === w ? { borderColor: T.amber, color: T.amber } : {}}
+                onClick={() => {
+                  if (w === data.refeedDay) return;
+                  update((d) => {
+                    const oldR = WEEK.indexOf(d.refeedDay);
+                    const newR = WEEK.indexOf(w);
+                    d.exercises.forEach((ex) => {
+                      const off = (WEEK.indexOf(ex.day) - oldR + 7) % 7;
+                      ex.day = WEEK[(newR + off) % 7];
+                    });
+                    d.refeedDay = w;
+                  });
+                  applySchedule(w);
+                }}>
+                {w.slice(0, 3)}
+              </button>
+            ))}
+          </Row>
+        </div>
+      )}
 
       {/* Name */}
       <div className="ll-card" style={{ padding: 14 }}>
@@ -1695,6 +1758,7 @@ function freshSeed() {
   d.unit = "lb";
   d.userName = "Alicia";
   d.nameAsked = true;
+  d.refeedDay = "Saturday";
   return d;
 }
 
@@ -1718,12 +1782,15 @@ function App() {
           if (!parsed.cycleWeeks) parsed.cycleWeeks = 8;
           if (!parsed.cycleName) parsed.cycleName = `Cycle ${parsed.cycleNumber || 1}`;
           if (parsed.userName === undefined) { parsed.userName = ""; parsed.nameAsked = false; }
+          if (REFEED_ROTATION && !parsed.refeedDay) parsed.refeedDay = "Saturday";
+          applySchedule(parsed.refeedDay);
           setData(parsed);
           return;
         }
         throw new Error("empty");
       } catch {
         const seed = freshSeed();
+        applySchedule(seed.refeedDay);
         setData(seed);
         try { await window_storage.set(STORAGE_KEY, JSON.stringify(seed)); }
         catch { setLoadError(true); }
@@ -1755,6 +1822,7 @@ function App() {
 
   const reseed = () => {
     const seed = freshSeed();
+    applySchedule(seed.refeedDay);
     setData(seed);
     scheduleSave(seed);
   };
@@ -1789,7 +1857,7 @@ function App() {
           <ProgressView data={data} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { setData(next); scheduleSave(next); }} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { applySchedule(next.refeedDay); setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (
