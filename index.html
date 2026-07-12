@@ -1,0 +1,1751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#141518" />
+<title>Franco Fit</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>html, body { margin: 0; background: #141518; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+/* FRANCO FIT — VERSION A (Alicia) — standalone build */
+const { useState, useEffect, useRef, useMemo } = React;
+
+/* ------------------------------------------------------------------ */
+/* Theme                                                               */
+/* ------------------------------------------------------------------ */
+const T = {
+  bg: "#141518",
+  surface: "#1D1F24",
+  surface2: "#26282F",
+  line: "#30333B",
+  ink: "#EDEEE9",
+  muted: "#9BA0A9",
+  faint: "#6C7078",
+  pos: "#69B56D",
+  neg: "#D96A5B",
+  amber: "#E3A93C",
+  blue: "#5B9DFF",
+};
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sunday"];
+const DAY_NUM = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Sunday: 0 };
+const DAY_COLOR = {
+  Monday: "#B08BD0",
+  Tuesday: "#CE5148",
+  Wednesday: "#5480C8",
+  Thursday: "#8B8F98",
+  Friday: "#E3A93C",
+  Sunday: "#5AA35F",
+};
+const OPTIONAL_DAYS = { Monday: true, Thursday: true };
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
+.ll-root { min-height: 100vh; background: ${T.bg}; color: ${T.ink}; font-family: 'Barlow', -apple-system, 'Segoe UI', sans-serif; font-size: 15px; }
+.ll-shell { max-width: 480px; margin: 0 auto; padding: 0 14px 96px; }
+.ll-display { font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; letter-spacing: 0.04em; }
+.ll-num { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-variant-numeric: tabular-nums; }
+.ll-card { background: ${T.surface}; border: 1px solid ${T.line}; border-radius: 14px; margin-bottom: 10px; overflow: hidden; }
+.ll-btn { background: ${T.surface2}; color: ${T.ink}; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
+.ll-btn:active { transform: scale(0.97); }
+.ll-btn-chalk { background: ${T.ink}; color: ${T.bg}; border-color: ${T.ink}; }
+.ll-btn-sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+.ll-step { width: 40px; height: 40px; border-radius: 10px; background: ${T.surface2}; border: 1px solid ${T.line}; color: ${T.ink}; font-size: 17px; font-weight: 700; cursor: pointer; flex: none; }
+.ll-step:active { transform: scale(0.94); }
+.ll-input { background: ${T.bg}; border: 1px solid ${T.line}; border-radius: 10px; color: ${T.ink}; padding: 9px 10px; font-size: 16px; width: 100%; font-family: inherit; box-sizing: border-box; }
+.ll-input:focus { outline: none; border-color: ${T.muted}; }
+.ll-setnum { width: 64px; text-align: center; font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+.ll-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid ${T.line}; background: ${T.surface2}; color: ${T.muted}; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ll-chip.on { color: ${T.ink}; border-color: ${T.muted}; background: ${T.surface}; }
+.ll-chip.starred { border-color: rgba(246,200,81,0.55); background: rgba(246,200,81,0.08); box-shadow: 0 0 9px rgba(246,200,81,0.35); }
+.ll-chip.starred.on { border-color: rgba(246,200,81,0.9); box-shadow: 0 0 11px rgba(246,200,81,0.5); color: ${T.ink}; }
+.ll-chip.optional { border-style: dashed; color: ${T.faint}; }
+.ll-chip.optional.on { color: ${T.ink}; border-color: ${T.muted}; }
+.ll-tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: ${T.surface}; border-top: 1px solid ${T.line}; display: flex; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
+.ll-tab { flex: 1; padding: 13px 0 11px; text-align: center; color: ${T.faint}; font-weight: 600; font-size: 13px; cursor: pointer; border: none; background: none; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; }
+.ll-tab.on { color: ${T.ink}; }
+.ll-tab.on .ll-tabline { background: ${T.ink}; }
+.ll-tabline { height: 3px; width: 28px; margin: 5px auto 0; border-radius: 2px; background: transparent; }
+.ll-platebar { height: 14px; border-radius: 4px; min-width: 4px; background-size: 12px 100%; }
+.ll-note { background: rgba(227,169,60,0.12); border: 1px solid rgba(227,169,60,0.35); border-radius: 10px; padding: 8px 10px; color: ${T.amber}; font-size: 13.5px; }
+.ll-fade { animation: llfade .18s ease; }
+@keyframes llfade { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none;} }
+@media (prefers-reduced-motion: reduce) { .ll-fade { animation: none; } .ll-btn:active,.ll-step:active { transform: none; } }
+textarea.ll-input { resize: vertical; min-height: 44px; font-size: 15px; }
+.ll-reps { border-color: rgba(227,169,60,0.55) !important; background: rgba(227,169,60,0.08) !important; color: ${T.amber} !important; }
+.ll-reps.good { border-color: rgba(105,181,109,0.75) !important; background: rgba(105,181,109,0.12) !important; color: ${T.pos} !important; }
+.ll-reps.bad { border-color: rgba(217,106,91,0.75) !important; background: rgba(217,106,91,0.12) !important; color: ${T.neg} !important; }
+.ll-tagchip { padding: 3px 10px; border-radius: 999px; border: 1px solid ${T.line}; background: none; color: ${T.faint}; font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.ll-tagchip.on { border-color: ${T.amber}; color: ${T.amber}; background: rgba(227,169,60,0.1); }
+.ll-star { color: #F6C851; text-shadow: 0 0 7px rgba(246,200,81,0.75); }
+.ll-resttab { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 7px 12px 8px; border-left: 1px solid ${T.line}; min-width: 106px; }
+.ll-restpill { display: flex; align-items: center; gap: 6px; background: rgba(91,157,255,0.1); border: 1px solid rgba(91,157,255,0.55); color: ${T.blue}; border-radius: 999px; padding: 6px 14px; font-weight: 700; font-size: 13px; cursor: pointer; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.09em; }
+.ll-restpill.on { background: ${T.blue}; color: #10151D; border-color: ${T.blue}; padding: 4px 6px 4px 12px; }
+.ll-restpill.on.long { background: ${T.neg}; border-color: ${T.neg}; color: ${T.ink}; animation: llshake 1.6s ease-in-out infinite; }
+@keyframes llshake { 0%, 50%, 100% { transform: translateX(0); } 8% { transform: translateX(-2px); } 16% { transform: translateX(2px); } 24% { transform: translateX(-2px); } 32% { transform: translateX(2px); } 40% { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .ll-restpill.on.long { animation: none; } }
+.ll-celebrate { position: fixed; inset: 0; background: rgba(10,11,13,0.78); z-index: 100; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 28px; text-align: center; }
+.ll-confetti { position: fixed; border-radius: 2px; z-index: 101; pointer-events: none; opacity: 0; }
+@keyframes llburst { 0% { transform: translate(0, 0) rotate(0deg); opacity: 1; } 70% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 1; } 100% { transform: translate(var(--tx), calc(var(--ty) + 45vh)) rotate(calc(var(--rot) * 1.6)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ll-confetti { display: none; } }
+.ll-restmain { background: none; border: none; color: inherit; font-weight: 800; font-size: 16px; cursor: pointer; padding: 0; }
+.ll-reststop { background: rgba(0,0,0,0.2); border: none; color: inherit; width: 22px; height: 22px; border-radius: 11px; font-size: 11px; cursor: pointer; flex: none; }
+`;
+
+/* ------------------------------------------------------------------ */
+/* Seed data — imported from the Google Sheet (cycle 2, weeks 1–4)    */
+/* ------------------------------------------------------------------ */
+const RAW = {
+  Monday: {
+    dates: [],
+    ex: [
+      ["Hip Abductions", null, [], 3, 8],
+      ["Hip Thrusts", null, [], 3, 8],
+      ["RDL's", null, [], 3, 8],
+      ["Leg Press", null, [], 3, 8],
+      ["Cable Kickbacks", null, [], 3, 8],
+      ["Shoulder Press", null, [], 3, 8],
+      ["Face-Pulls", null, [], 3, 8],
+      ["Back Extensions", null, [], 3, 8],
+      ["Hamstring Curls", null, [], 3, 8],
+    ],
+  },
+  Tuesday: {
+    dates: [],
+    ex: [
+      ["Outer Thigh Machine", null, [], 6, 12],
+      ["Hip Thrusts", null, [], 6, 12],
+      ["RDL's", null, [], 6, 12],
+      ["Leg Press", null, [], 6, 12],
+      ["Cable Kickbacks", null, [], 6, 12],
+      ["Calves", null, [], 6, 12],
+      ["Rear Shoulders", null, [], 6, 12],
+      ["Triceps", null, [], 6, 12],
+      ["Seated Cable Row", null, [], 6, 12],
+      ["Bicep Curls", null, [], 6, 12],
+    ],
+  },
+  Wednesday: {
+    dates: [],
+    ex: [
+      ["Hip Abductions", null, [], 6, 12],
+      ["Hip Thrusts", null, [], 6, 12],
+      ["RDL's", null, [], 6, 12],
+      ["Leg Press", null, [], 6, 12],
+      ["Cable Kickbacks", null, [], 6, 12],
+      ["Peck Deck", null, [], 6, 12],
+      ["Lat Pulldown", null, [], 6, 12],
+      ["Seated Row", null, [], 6, 12],
+      ["Lateral Raises", null, [], 6, 12],
+    ],
+  },
+  Thursday: {
+    dates: [],
+    ex: [
+      ["Hip Abductions", null, [], 3, 8],
+      ["Hip Thrusts", null, [], 3, 8],
+      ["RDL's", null, [], 3, 8],
+      ["Leg Press", null, [], 3, 8],
+      ["Cable Kickbacks", null, [], 3, 8],
+      ["Shoulder Press", null, [], 3, 8],
+      ["Face-Pulls", null, [], 3, 8],
+      ["Back Extensions", null, [], 3, 8],
+      ["Hamstring Curls", null, [], 3, 8],
+    ],
+  },
+  Friday: {
+    dates: [],
+    ex: [
+      ["Outer Thigh Machine", null, [], 2, 8],
+      ["Hip Thrusts", null, [], 2, 8],
+      ["RDL's", null, [], 2, 8],
+      ["Leg Press", null, [], 2, 8],
+      ["Cable Kickbacks", null, [], 2, 8],
+      ["Calves", null, [], 2, 8],
+      ["Rear Shoulders", null, [], 2, 8],
+      ["Triceps", null, [], 2, 8],
+      ["Seated Cable Row", null, [], 2, 8],
+      ["Bicep Curls", null, [], 2, 8],
+    ],
+  },
+  Sunday: {
+    dates: [],
+    ex: [
+      ["Hip Abductions", null, [], 3, 6],
+      ["Hip Thrusts", null, [], 3, 6],
+      ["RDL's", null, [], 3, 6],
+      ["Leg Press", null, [], 3, 6],
+      ["Cable Kickbacks", null, [], 3, 6],
+      ["Shoulder Press", null, [], 3, 6],
+      ["Face-Pulls", null, [], 3, 6],
+      ["Back Extensions", null, [], 3, 6],
+      ["Seated Row", null, [], 3, 6],
+    ],
+  },
+};
+
+const parseSets = (s) =>
+  s && s.trim()
+    ? s.trim().split(/\s+/).map((t) => {
+        const [w, r] = t.split("x");
+        return { w: parseFloat(w), r: parseInt(r, 10) || 0 };
+      })
+    : [];
+
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+function buildSeed() {
+  const data = {
+    version: 1,
+    unit: "kg",
+    userName: "",
+    nameAsked: false,
+    cycleNumber: 2,
+    cycleName: "Cycle 2",
+    cycleWeeks: 8,
+    cycleStart: "2026-06-15",
+    exercises: [],
+    sessions: {},
+  };
+  for (const day of DAYS) {
+    RAW[day].ex.forEach(([name, prev, weeks, setsOverride, repGoal], i) => {
+      const id = slug(`${day}-${i}-${name}`);
+      const targetSets = setsOverride || Math.max(1, ...weeks.map((w) => parseSets(w).length));
+      data.exercises.push({
+        id,
+        day,
+        name,
+        prev,
+        targetSets,
+        repGoal: repGoal || null,
+        variants: [{ id: "main", name: "Usual machine" }],
+        activeVariant: "main",
+      });
+      weeks.forEach((str, wi) => {
+        const sets = parseSets(str);
+        const date = RAW[day].dates[wi];
+        if (!sets.length || !date) return;
+        const key = `${date}|${day}`;
+        if (!data.sessions[key]) data.sessions[key] = { date, day, entries: {} };
+        data.sessions[key].entries[id] = { variantId: "main", sets, note: "", swapName: "" };
+      });
+    });
+  }
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+const todayISO = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+const fmtDate = (iso) =>
+  new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const num = (v) => {
+  const n = parseFloat(v);
+  return isNaN(n) ? 0 : n;
+};
+const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.w) * num(s.r)), 0);
+const repsOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.r)), 0);
+const fmtVol = (n) => Math.round(n).toLocaleString("en-US");
+const setsLine = (sets) =>
+  sets
+    .filter((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0))
+    .map((s) => `${s.w}×${s.r}${s.tag ? ` (${s.tag})` : ""}`)
+    .join("  ");
+const entryHasData = (e) => e && e.sets && e.sets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
+
+function defaultDay() {
+  const jd = new Date().getDay();
+  if (Object.values(DAY_NUM).includes(jd)) {
+    return DAYS.find((d) => DAY_NUM[d] === jd);
+  }
+  let best = DAYS[0], bestGap = 8;
+  for (const d of DAYS) {
+    const gap = (DAY_NUM[d] - jd + 7) % 7;
+    if (gap < bestGap) { bestGap = gap; best = d; }
+  }
+  return best;
+}
+
+const sortedSessions = (data) =>
+  Object.entries(data.sessions)
+    .map(([key, s]) => ({ key, ...s }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+const addDays = (iso, n) => {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  const p = (x) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+const weekOfCycle = (data, iso) =>
+  Math.floor((new Date(iso + "T12:00:00") - new Date(data.cycleStart + "T12:00:00")) / (7 * 864e5));
+function cellDateFor(cycleStart, w, day) {
+  for (let i = 0; i < 7; i++) {
+    const iso = addDays(cycleStart, w * 7 + i);
+    if (new Date(iso + "T12:00:00").getDay() === DAY_NUM[day]) return iso;
+  }
+  return cycleStart;
+}
+const dayVolume = (sess) =>
+  Object.values(sess.entries).reduce((a, e) => a + (entryHasData(e) ? volumeOf(e.sets) : 0), 0);
+function daySessionIn(data, day, w) {
+  return sortedSessions(data).find(
+    (s) => s.day === day && weekOfCycle(data, s.date) === w && Object.values(s.entries).some(entryHasData)
+  );
+}
+
+/* Most recent session containing this exercise (optionally same variant), excluding a key */
+function lastEntryFor(data, exId, variantId, excludeKey, beforeDate) {
+  const list = sortedSessions(data);
+  for (let i = list.length - 1; i >= 0; i--) {
+    const s = list[i];
+    if (s.key === excludeKey) continue;
+    if (beforeDate && s.date >= beforeDate) continue;
+    const e = s.entries[exId];
+    if (!entryHasData(e)) continue;
+    if (variantId && e.variantId !== variantId) continue;
+    return { date: s.date, entry: e };
+  }
+  return null;
+}
+
+/* All sessions for an exercise, ascending */
+function historyFor(data, exId) {
+  return sortedSessions(data)
+    .filter((s) => entryHasData(s.entries[exId]))
+    .map((s) => ({ key: s.key, date: s.date, entry: s.entries[exId] }));
+}
+
+function pct(from, to) {
+  if (!from) return null;
+  return ((to - from) / from) * 100;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sheet export — mirrors the original Google Sheet layout             */
+/* ------------------------------------------------------------------ */
+function buildSheetRows(data) {
+  const start = new Date(data.cycleStart + "T12:00:00");
+  const weekOf = (iso) => Math.floor((new Date(iso + "T12:00:00") - start) / (7 * 864e5));
+  const sessions = sortedSessions(data);
+  let maxWeek = 0;
+  sessions.forEach((s) => {
+    const w = weekOf(s.date);
+    if (w >= 0 && w > maxWeek) maxWeek = w;
+  });
+  const weeks = maxWeek + 1;
+  const SETS = 6;
+
+  const rows = [];
+  const h1 = ["", "Prev"];
+  const h2 = ["", ""];
+  for (let w = 0; w < weeks; w++) {
+    for (let i = 0; i < SETS; i++) {
+      h1.push(i === 0 ? `Week ${w + 1}` : "");
+      h2.push(String(i + 1));
+    }
+  }
+  rows.push(h1, h2);
+
+  const extras = [];
+  for (const day of DAYS) {
+    rows.push([day]);
+    for (const ex of data.exercises.filter((e) => e.day === day)) {
+      const r = [ex.name, ex.prev ?? ""];
+      for (let w = 0; w < weeks; w++) {
+        const sess = sessions.find(
+          (s) => s.day === day && weekOf(s.date) === w && entryHasData(s.entries[ex.id])
+        );
+        const cells = Array(SETS).fill("");
+        if (sess) {
+          const e = sess.entries[ex.id];
+          const logged = e.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0);
+          logged.forEach((x, i) => {
+            const cell = `${x.w}x${x.r}${x.tag ? ` (${x.tag})` : ""}`;
+            if (i < SETS) cells[i] = cell;
+            else cells[SETS - 1] += ` + ${cell}`;
+          });
+          const vName = (ex.variants.find((v) => v.id === e.variantId) || {}).name || "";
+          if ((e.note && e.note.trim()) || (vName && vName !== "Usual machine") || e.swapName) {
+            extras.push([
+              sess.date, day, ex.name,
+              e.swapName ? `did ${e.swapName}` : "",
+              vName !== "Usual machine" ? vName : "",
+              e.note || "",
+            ]);
+          }
+        }
+        r.push(...cells);
+      }
+      rows.push(r);
+    }
+  }
+
+  if (extras.length) {
+    rows.push([], ["Machines, swaps & notes"], ["Date", "Day", "Exercise", "Swap", "Machine", "Note"]);
+    extras.forEach((n) => rows.push(n));
+  }
+  return rows;
+}
+
+const toCSV = (rows) =>
+  rows.map((r) => r.map((v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(",")).join("\n");
+
+const toTSV = (rows) =>
+  rows.map((r) => r.map((v) => String(v ?? "").replace(/[\t\n]/g, " ")).join("\t")).join("\n");
+
+/* ------------------------------------------------------------------ */
+/* Small UI pieces                                                     */
+/* ------------------------------------------------------------------ */
+const Row = ({ children, style }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 8, ...style }}>{children}</div>
+);
+
+const Delta = ({ value, suffix = "%" }) => {
+  if (value === null || value === undefined || !isFinite(value))
+    return <span style={{ color: T.faint, fontSize: 13 }}>—</span>;
+  const up = value >= 0;
+  return (
+    <span className="ll-num" style={{ color: up ? T.pos : T.neg, fontSize: 13, fontWeight: 700 }}>
+      {up ? "▲" : "▼"} {Math.abs(value).toFixed(1)}{suffix}
+    </span>
+  );
+};
+
+const PlateBar = ({ frac, color }) => (
+  <div
+    className="ll-platebar"
+    style={{
+      width: `${Math.max(3, frac * 100)}%`,
+      backgroundColor: color,
+      backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,0.28) 0 2px, transparent 2px 12px)`,
+    }}
+  />
+);
+
+const VariantDot = ({ index }) => {
+  const palette = ["#9BA0A9", "#E3A93C", "#5480C8", "#CE5148", "#5AA35F", "#B08BD0"];
+  return (
+    <span style={{ width: 8, height: 8, borderRadius: 4, background: palette[index % palette.length], display: "inline-block", flex: "none" }} />
+  );
+};
+
+/* This week's status for a given training day */
+function dayWeekStatus(data, d, wArg) {
+  const today = todayISO();
+  const w = wArg !== undefined ? wArg : Math.max(0, weekOfCycle(data, today));
+  const sess = daySessionIn(data, d, w);
+  if (sess) {
+    let prev = null;
+    for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
+    const dv = dayVolume(sess);
+    const pv = prev ? dayVolume(prev) : null;
+    return pv !== null && dv > pv ? "star" : pv !== null && dv < pv ? "down" : "logged";
+  }
+  const dateIso = cellDateFor(data.cycleStart, w, d);
+  if (dateIso === today) return "today";
+  if (dateIso < today) return OPTIONAL_DAYS[d] ? "optional" : "missed";
+  return "future";
+}
+
+function DayStatusIcon({ status, size = 8 }) {
+  if (status === "star") return <span className="ll-star" style={{ fontSize: size + 5, lineHeight: 1, flex: "none" }}>★</span>;
+  if (status === "missed") return <span style={{ color: T.faint, fontSize: size + 2, lineHeight: 1, flex: "none" }}>✕</span>;
+  const st = { width: size, height: size, borderRadius: size, flex: "none", display: "inline-block" };
+  if (status === "down") return <span style={{ ...st, background: T.neg }} />;
+  if (status === "logged") return <span style={{ ...st, background: T.pos }} />;
+  if (status === "today") return <span style={{ ...st, border: `2px solid ${T.blue}` }} />;
+  if (status === "optional") return <span style={{ ...st, border: `1.5px dashed ${T.faint}`, opacity: 0.8 }} />;
+  return <span style={{ ...st, border: `1.5px solid ${T.line}`, opacity: 0.6 }} />;
+}
+
+/* ------------------------------------------------------------------ */
+/* Set editor row                                                      */
+/* ------------------------------------------------------------------ */
+const SET_TAGS = ["drop set", "partials", "rest-pause", "burnout"];
+
+function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
+  const w = num(set.w), r = num(set.r);
+  let repsCls = "";
+  let target = null;
+  if (compareSet) {
+    const lw = num(compareSet.w), lr = num(compareSet.r);
+    const lastScore = lw > 0 ? lw * lr : lr;
+    /* reps needed at today's weight to beat last week's set */
+    if (w > 0) target = Math.floor((lw * lr) / w) + 1;
+    else if (lw === 0) target = lr + 1;
+    if (r > 0) {
+      const todayScore = lw === 0 && w === 0 ? r : w * r;
+      repsCls = todayScore > lastScore ? "good" : todayScore < lastScore ? "bad" : "";
+    }
+  }
+  const dim = set.skipped ? { opacity: 0.4, pointerEvents: "none" } : {};
+  return (
+    <div style={{ marginBottom: set.extra ? 4 : 8 }}>
+      <Row>
+        <span className="ll-num" style={{ color: set.skipped ? T.faint : set.extra ? T.amber : T.faint, width: 18, fontSize: 13, flex: "none" }}>
+          {set.skipped ? "–" : set.extra ? "+" : idx + 1}
+        </span>
+        <input className="ll-input ll-setnum" style={{ width: 78, ...dim }} inputMode="decimal" value={set.w} aria-label="weight" placeholder={unit || "kg"} disabled={!!set.skipped}
+          onChange={(e) => onChange({ ...set, w: e.target.value })} />
+        <span style={{ color: T.faint, fontSize: 13 }}>×</span>
+        <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="minus 1 rep" onClick={() => onChange({ ...set, r: Math.max(0, num(set.r) - 1) })}>−</button>
+        <input className={`ll-input ll-setnum ll-reps ${repsCls}`} style={dim} inputMode="numeric" value={set.r} aria-label="reps" disabled={!!set.skipped}
+          placeholder={target ? `${target}+` : repGoal ? String(repGoal) : "reps"}
+          onChange={(e) => onChange({ ...set, r: e.target.value })} />
+        <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="plus 1 rep" onClick={() => onChange({ ...set, r: num(set.r) + 1 })}>+</button>
+        <button onClick={() => onChange({ ...set, w: "", r: "", tag: "", skipped: false, skipNote: "" })} aria-label="clear set" title="clear set"
+          style={{ background: "none", border: "none", color: T.muted, fontSize: 16, cursor: "pointer", padding: "0 3px" }}>⌫</button>
+        {set.extra ? (
+          <button onClick={onRemove} aria-label="remove set" title="delete set"
+            style={{ background: "none", border: "none", color: T.faint, fontSize: 17, cursor: "pointer", padding: "0 2px" }}>✕</button>
+        ) : (
+          <button onClick={() => onChange({ ...set, skipped: !set.skipped })} aria-label={set.skipped ? "unskip set" : "skip set"}
+            style={{ background: "none", border: "none", color: set.skipped ? T.amber : T.faint, fontSize: 11.5, cursor: "pointer", padding: "0 2px", fontFamily: "inherit", fontWeight: 600 }}>
+            {set.skipped ? "undo" : "skip"}
+          </button>
+        )}
+      </Row>
+      {!set.extra && set.skipped && (
+        <input className="ll-input" style={{ margin: "5px 0 8px 26px", width: "calc(100% - 26px)", fontSize: 13 }}
+          placeholder="Why skip? (machine taken, out of gas…)" value={set.skipNote || ""}
+          onChange={(e) => onChange({ ...set, skipNote: e.target.value })} />
+      )}
+      {set.extra && (
+        <Row style={{ gap: 5, margin: "5px 0 8px 26px", flexWrap: "wrap" }}>
+          {SET_TAGS.map((t) => (
+            <button key={t} className={`ll-tagchip ${set.tag === t ? "on" : ""}`}
+              onClick={() => onChange({ ...set, tag: set.tag === t ? "" : t })}>
+              {t}
+            </button>
+          ))}
+        </Row>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Exercise card (Today view)                                          */
+/* ------------------------------------------------------------------ */
+function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
+  const [open, setOpen] = useState(false);
+  const [addingMachine, setAddingMachine] = useState(false);
+  const [machineName, setMachineName] = useState("");
+  const [swapping, setSwapping] = useState(false);
+  const [swapText, setSwapText] = useState("");
+
+  const session = data.sessions[sessionKey];
+  const sessionDate = sessionKey.split("|")[0];
+  const entry = session && session.entries[ex.id];
+  const variantId = entry ? entry.variantId : ex.activeVariant;
+  const variant = ex.variants.find((v) => v.id === variantId) || ex.variants[0];
+
+  const lastSame = lastEntryFor(data, ex.id, variantId, sessionKey, sessionDate);
+  const lastAny = lastEntryFor(data, ex.id, null, sessionKey, sessionDate);
+
+  const ensureEntry = (d) => {
+    if (!d.sessions[sessionKey]) {
+      d.sessions[sessionKey] = { date: sessionKey.split("|")[0], day: ex.day, entries: {} };
+    }
+    if (!d.sessions[sessionKey].entries[ex.id]) {
+      d.sessions[sessionKey].entries[ex.id] = {
+        variantId: ex.activeVariant,
+        sets: Array.from({ length: ex.targetSets || 3 }, () => ({ w: "", r: "", extra: false, tag: "" })),
+        note: "",
+        swapName: "",
+      };
+    }
+    return d.sessions[sessionKey].entries[ex.id];
+  };
+
+  /* Baked-in sets: opening the card lays out (and heals) the planned set count */
+  useEffect(() => {
+    if (!open) return;
+    update((d) => {
+      const e = ensureEntry(d);
+      const nonExtra = e.sets.filter((s) => !s.extra);
+      const extras = e.sets.filter((s) => s.extra);
+      while (nonExtra.length < (ex.targetSets || 3)) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
+      e.sets = [...nonExtra, ...extras];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const changeSet = (i, ns) =>
+    update((d) => {
+      const e = ensureEntry(d);
+      const oldW = String(e.sets[i].w ?? "");
+      e.sets[i] = ns;
+      /* Cascade weight down to blank/matching sets — but never cascade a clear */
+      const newW = String(ns.w ?? "");
+      if (newW !== oldW && newW !== "") {
+        for (let j = i + 1; j < e.sets.length; j++) {
+          const wj = String(e.sets[j].w ?? "");
+          if (wj === "" || wj === oldW) e.sets[j] = { ...e.sets[j], w: ns.w };
+        }
+      }
+    });
+
+  const addExtraSet = () =>
+    update((d) => {
+      const e = ensureEntry(d);
+      const lastWeighted = [...e.sets].reverse().find((s) => num(s.w) > 0);
+      e.sets.push({ w: lastWeighted ? lastWeighted.w : "", r: "", extra: true, tag: "" });
+    });
+
+  const copyLast = () =>
+    update((d) => {
+      const e = ensureEntry(d);
+      if (lastSame) e.sets = lastSame.entry.sets.map((s) => ({ extra: false, tag: "", ...s }));
+    });
+
+  const todaySets = entry ? entry.sets : [];
+  const hasLogged = todaySets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
+  const plannedToday = todaySets.filter((s) => !s.extra);
+  const exTotal = Math.max(plannedToday.length, ex.targetSets || 3);
+  const plannedFilled = plannedToday.filter((s) => num(s.r) > 0 || s.skipped).length;
+  const extraFilled = todaySets.filter((s) => s.extra && num(s.r) > 0).length;
+  const exFilled = plannedFilled + extraFilled;
+  const exComplete = plannedFilled >= exTotal;
+  const todayVol = volumeOf(todaySets);
+  const lastVol = lastSame ? volumeOf(lastSame.entry.sets) : 0;
+  const liveDelta = hasLogged && lastSame ? pct(lastVol, todayVol) : null;
+  const beating = exComplete && liveDelta !== null && liveDelta > 0;
+  const stripColor = !exComplete
+    ? T.line
+    : beating ? T.pos : liveDelta !== null && liveDelta < 0 ? T.neg : T.amber;
+
+  const bodyweight = lastSame && volumeOf(lastSame.entry.sets) === 0 && repsOf(lastSame.entry.sets) > 0;
+
+  return (
+    <div className="ll-card">
+      {/* header */}
+      <div onClick={() => setOpen(!open)} style={{ padding: "13px 14px", cursor: "pointer" }}>
+        <Row style={{ justifyContent: "space-between" }}>
+          <Row style={{ gap: 9, minWidth: 0 }}>
+            <span style={{ width: 4, alignSelf: "stretch", minHeight: 20, borderRadius: 2, background: stripColor, flex: "none", boxShadow: beating ? "0 0 8px rgba(105,181,109,0.7)" : "none" }} />
+            <div style={{ minWidth: 0 }}>
+              <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>
+                {entry && entry.swapName ? entry.swapName : ex.name}
+                {entry && entry.swapName ? (
+                  <span style={{ color: T.amber, fontSize: 12, marginLeft: 8, fontFamily: "Barlow" }}>swapped</span>
+                ) : null}
+              </div>
+              <div style={{ color: T.muted, fontSize: 12.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {ex.variants.length > 1 ? `${variant.name} · ` : ""}
+                {lastSame ? `last ${fmtDate(lastSame.date)}: ${setsLine(lastSame.entry.sets)}` : "no history on this machine"}
+              </div>
+            </div>
+          </Row>
+          <Row style={{ gap: 8, flex: "none" }}>
+            {exFilled > 0 && (
+              <span className="ll-num" style={{ color: exComplete ? T.pos : T.faint, fontSize: 12, fontWeight: 700 }}>
+                {exFilled}/{exTotal}{exComplete ? " ✓" : ""}
+              </span>
+            )}
+            {lastSame && lastSame.entry.note && <span title="note last time" style={{ color: T.amber, fontSize: 14 }}>●</span>}
+            <span style={{ color: T.faint, fontSize: 13 }}>{open ? "▾" : "▸"}</span>
+          </Row>
+        </Row>
+      </div>
+
+      {open && (
+        <div className="ll-fade" style={{ padding: "0 14px 14px", borderTop: `1px solid ${T.line}` }}>
+          {/* last time */}
+          <div style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", margin: "12px 0 10px" }}>
+            {lastSame ? (
+              <>
+                <Row style={{ justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ color: T.muted, fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Last time · {fmtDate(lastSame.date)}
+                  </span>
+                  <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
+                    {bodyweight ? `${repsOf(lastSame.entry.sets)} reps` : `vol ${fmtVol(lastVol)}`}
+                  </span>
+                </Row>
+                <div className="ll-num" style={{ fontSize: 15.5, lineHeight: 1.5 }}>{setsLine(lastSame.entry.sets)}</div>
+                {lastSame.entry.sets.some((s) => s.skipped && s.skipNote) && (
+                  <div style={{ color: T.faint, fontSize: 12, marginTop: 4 }}>
+                    {lastSame.entry.sets
+                      .map((s, i) => (s.skipped && s.skipNote ? `set ${i + 1} skipped: ${s.skipNote}` : null))
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                )}
+                {lastSame.entry.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{lastSame.entry.note}”</div> : null}
+              </>
+            ) : (
+              <>
+                <div style={{ color: T.muted, fontSize: 13.5 }}>First time on <b style={{ color: T.ink }}>{variant.name}</b>.</div>
+                {lastAny && (
+                  <div style={{ color: T.faint, fontSize: 12.5, marginTop: 4 }}>
+                    Other machine, {fmtDate(lastAny.date)}: <span className="ll-num">{setsLine(lastAny.entry.sets)}</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* machine selector */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+            {ex.variants.map((v, i) => (
+              <button key={v.id} className={`ll-chip ${v.id === variantId ? "on" : ""}`}
+                onClick={() =>
+                  update((d) => {
+                    const dex = d.exercises.find((x) => x.id === ex.id);
+                    dex.activeVariant = v.id;
+                    const s = d.sessions[sessionKey];
+                    if (s && s.entries[ex.id]) s.entries[ex.id].variantId = v.id;
+                  })
+                }>
+                <VariantDot index={i} /> {v.name}
+              </button>
+            ))}
+            {addingMachine ? (
+              <Row style={{ width: "100%" }}>
+                <input className="ll-input" autoFocus placeholder="Machine name (e.g. plate-loaded)" value={machineName}
+                  onChange={(e) => setMachineName(e.target.value)} />
+                <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                  const name = machineName.trim();
+                  if (!name) return;
+                  update((d) => {
+                    const dex = d.exercises.find((x) => x.id === ex.id);
+                    const vid = slug(name) + "-" + dex.variants.length;
+                    dex.variants.push({ id: vid, name });
+                    dex.activeVariant = vid;
+                    const s = d.sessions[sessionKey];
+                    if (s && s.entries[ex.id]) s.entries[ex.id].variantId = vid;
+                  });
+                  setMachineName(""); setAddingMachine(false);
+                }}>Add</button>
+              </Row>
+            ) : (
+              <button className="ll-chip" onClick={() => setAddingMachine(true)}>+ machine</button>
+            )}
+          </div>
+
+          {/* today's sets */}
+          {todaySets.length > 0 && (
+            <Row style={{ justifyContent: "center", gap: 6, margin: "2px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
+              <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+            </Row>
+          )}
+          {(() => {
+            const lastLogged = lastSame
+              ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
+              : [];
+            return todaySets.map((s, i) => (
+              <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
+                compareSet={!s.extra ? lastLogged[i] : undefined}
+                onChange={(ns) => changeSet(i, ns)}
+                onRemove={() => update((d) => { ensureEntry(d).sets.splice(i, 1); })} />
+            ));
+          })()}
+
+          <Row style={{ marginTop: 4, marginBottom: 10 }}>
+            {lastSame && !hasLogged && (
+              <button className="ll-btn ll-btn-chalk" style={{ flex: 1 }} onClick={copyLast}>Copy last time</button>
+            )}
+            <button className="ll-btn" style={{ flex: 1 }} onClick={addExtraSet}>+ Extra set</button>
+          </Row>
+
+          {hasLogged && (
+            <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ color: T.muted, fontSize: 13 }}>
+                Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> vol
+              </span>
+              <Delta value={liveDelta} />
+            </Row>
+          )}
+
+          {/* note */}
+          <textarea className="ll-input" placeholder="Note for today (seat position, pain, tempo…)"
+            value={entry ? entry.note : ""} rows={1}
+            onChange={(e) => update((d) => { ensureEntry(d).note = e.target.value; })} />
+
+          {/* swap exercise */}
+          <div style={{ marginTop: 10 }}>
+            {swapping ? (
+              <Row>
+                <input className="ll-input" autoFocus placeholder="What are you doing instead?" value={swapText}
+                  onChange={(e) => setSwapText(e.target.value)} />
+                <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                  update((d) => { ensureEntry(d).swapName = swapText.trim(); });
+                  setSwapping(false);
+                }}>Set</button>
+              </Row>
+            ) : entry && entry.swapName ? (
+              <button className="ll-btn ll-btn-sm" onClick={() => update((d) => { ensureEntry(d).swapName = ""; })}>
+                Undo swap (back to {ex.name})
+              </button>
+            ) : (
+              <button style={{ background: "none", border: "none", color: T.faint, fontSize: 13, cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                onClick={() => { setSwapText(""); setSwapping(true); }}>
+                ⇄ Swap exercise for today
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Celebrations — fires when the day's last exercise gets logged       */
+/* ------------------------------------------------------------------ */
+const CELEBRATIONS = [
+  "Fuck, {name}. You’re getting dangerously hot.",
+  "Wet floor. {name} just finished working out.",
+  "That pump is making me horny",
+  "Calm down, {name}. Some of us are trying not to stare.",
+  "Congratulations, {name}. You’re officially fuckable as hell.",
+  "God damn, {name}. Save some sex appeal for everyone else.",
+  "That body is begging to be touched, {name}.",
+  "Fuck me, {name}. That pump is obscene.",
+  "{name}, you’re one flex away from getting someone pregnant.",
+  "Making me wet, one rep at a time, {name}.",
+  "That workout made you significantly harder to resist, {name}.",
+  "{name}, you look like you fuck.",
+  "Someone’s imagining you naked right now, {name}.",
+  "{name}, that body deserves to be climbed.",
+  "Your gym crush is absolutely fucked, {name}.",
+  "That pump could make a grown man beg, {name}.",
+  "{name}, your body is giving me inappropriate thoughts.",
+  "Absolutely filthy physique, {name}.",
+  "{name}, you look like you’d ruin someone’s entire weekend.",
+  "Horny jail for you, {name}. Immediately.",
+  "{name}, you’re built like someone’s favorite fantasy.",
+  "That ass just gained market value, {name}.",
+  "{name}, you’re getting dangerously good at making people wet.",
+  "The mirror needs a cigarette after looking at you, {name}.",
+  "That body could make someone forget they’re married, {name}.",
+  "{name}, you’re looking very hard to behave around.",
+  "Fuck, {name}. Your body is becoming a public indecency.",
+  "{name}, your pump is giving “rip my clothes off.”",
+  "Someone’s biting their lip because of you, {name}.",
+  "{name}, you’re looking very lickable right now",
+  "{name}, you’re becoming a walking boner alert.",
+  "Hot. Sweaty. Fuckable. Good work, {name}.",
+  "That physique could turn a good person into a slut, {name}.",
+  "Your body is screaming “come fuck me,” {name}.",
+  "{name}, you look like you’d leave bite marks.",
+  "That pump is pure fucking foreplay, {name}.",
+  "{name}, we should do cardio in bed.",
+  "Congratulations, {name}. You’re someone’s masturbation material now.",
+  "{name}, your sex appeal just became medically concerning.",
+  "That workout made your clothes significantly less necessary, {name}.",
+  "Absolutely dripping over here, {name}.",
+  "{name}, that pump deserves to be touched slowly.",
+  "Your body just upgraded from attractive to sexually distracting, {name}.",
+  "The gym got wetter when you finished, {name}.",
+  "{name}, your physique is becoming indecent.",
+  "{name}, your body is now in face-sitting mode.",
+  "That workout made you look aggressively breedable, {name}.",
+  "{name}, you could get away with some terrible behavior looking like that.",
+  "Your pump is making my thoughts filthy, {name}.",
+  "{name}, you’re becoming the kind of hot that ruins friendships.",
+  "That body belongs against someone’s bedroom wall, {name}.",
+  "{name}, you look like you’d be difficult to get over.",
+  "Fuck the workout, {name}. Let’s talk about what that pump is doing to me.",
+  "You are officially too hot for respectful eye contact, {name}.",
+  "{name}, you’re one shirtless photo away from causing chaos.",
+  "That body could make someone say “yes” before hearing the question, {name}.",
+  "The pump is real. So is my erection, {name}.",
+  "{name}, you’re getting hot enough to make people act out of character.",
+  "Your body is giving “fuck me first, ask questions later,” {name}.",
+  "{name}, you just turned sweat into a sexual weapon.",
+  "That pump has me soaking wet, {name}.",
+  "{name}, your body deserves an adults-only warning.",
+  "Someone wants to sit on your face, {name}.",
+  "Your sex appeal just hit a new personal record, {name}.",
+  "{name}, the workout is over. The dirty thoughts are beginning.",
+  "{name}, you’re looking painfully fuckable today.",
+  "The iron is hard. I’m harder, {name}.",
+  "{name}, you’re one flex away from making me lose my fucking mind.",
+  "Workout complete. Sexual threat level increased, {name}.",
+  "{name}, your body is officially rated R.",
+  "You finished the workout, {name}. Now finish me.",
+  "Good fucking work, {name}. Emphasis on the fucking.",
+  "Your glutes are growing. So is my erection, {name}.",
+  "I’m hard. You’re hot. Great workout, {name}.",
+  "That ass is getting breedable as fuck, {name}.",
+  "I would like to inspect that pump more closely, {name}.",
+  "I can’t decide whether to worship that ass or bite it.",
+  "I’m harder than the workout you just finished, {name}.",
+  "I’m imagining what that glute pump feels like in my hands.",
+  "Your glutes are activated. So am I.",
+  "Your body is becoming a breeding fantasy, {name}.",
+  "That ass deserves praise, attention, and several uninterrupted hours.",
+  "Your ass just set a personal record in making me horny.",
+  "You’re looking so breedable I forgot what this notification was supposed to say.",
+  "Your ass is making my mouth water, {name}.",
+  "That glute pump belongs directly in my face.",
+  "I’m trying to celebrate your discipline. My erection is celebrating your ass.",
+  "Your workout is complete. My breeding thoughts are just getting started.",
+  "I’m ready to give that glute pump the attention it deserves.",
+  "Your legs are shaking. I’d like to keep that trend going.",
+  "Your ass is now officially my favorite muscle group.",
+  "I’d say good workout {name}, but “sit on my face” feels more honest.",
+  "You look like you need protein, hydration, and several inches in bed",
+];
+
+function Celebration({ msg, refeed, onClose }) {
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: 140 }, (_, i) => {
+        const fromLeft = i % 2 === 0;
+        return {
+          fromLeft,
+          tx: (8 + Math.random() * 78) * (fromLeft ? 1 : -1),
+          ty: -(35 + Math.random() * 62),
+          w: 5 + Math.random() * 6,
+          h: 8 + Math.random() * 9,
+          color: ["#F6C851", "#69B56D", "#5B9DFF", "#D96A5B", "#EDEEE9"][i % 5],
+          dur: 2.2 + Math.random() * 1.7,
+          delay: Math.random() * 2.8,
+          rot: 360 + Math.random() * 720,
+        };
+      }),
+    []
+  );
+  useEffect(() => {
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  return (
+    <div className="ll-celebrate ll-fade" onClick={onClose}>
+      {pieces.map((p, i) => (
+        <span key={i} className="ll-confetti" style={{
+          [p.fromLeft ? "left" : "right"]: -8,
+          bottom: -12,
+          width: p.w, height: p.h, background: p.color,
+          "--tx": `${p.tx}vw`, "--ty": `${p.ty}vh`, "--rot": `${p.rot}deg`,
+          animation: `llburst ${p.dur}s cubic-bezier(0.16, 0.9, 0.35, 1) ${p.delay}s forwards`,
+        }} />
+      ))}
+      <span className="ll-star" style={{ fontSize: 46, lineHeight: 1 }}>★</span>
+      <div className="ll-display" style={{ fontSize: 38, fontWeight: 700, marginTop: 12, lineHeight: 1.1 }}>{msg}</div>
+      {refeed && (
+        <div className="ll-display" style={{ fontSize: 22, fontWeight: 600, color: T.amber, marginTop: 14 }}>
+          Enjoy the REFEED! You earned it!
+        </div>
+      )}
+      <div style={{ color: T.faint, fontSize: 12, marginTop: 20 }}>tap to dismiss</div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Today view                                                          */
+/* ------------------------------------------------------------------ */
+function TodayView({ data, update, day, setDay }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const curWeek = Math.max(0, weekOfCycle(data, todayISO()));
+  const maxWeek = Math.max((data.cycleWeeks || 8) - 1, curWeek);
+  const wIdx = Math.min(maxWeek, Math.max(0, curWeek + weekOffset));
+  const existing = daySessionIn(data, day, wIdx);
+  const dateFor = existing ? existing.date : cellDateFor(data.cycleStart, wIdx, day);
+  const sessionKey = existing ? existing.key : `${dateFor}|${day}`;
+  const exList = data.exercises.filter((e) => e.day === day);
+  const isToday = dateFor === todayISO();
+
+  const sess = data.sessions[sessionKey];
+  const [celebration, setCelebration] = useState(null);
+
+  /* Completion: every planned set of every exercise is filled or skipped —
+     an exercise with a missing entry or missing rows counts its full target */
+  let totalSets = 0, filledSets = 0;
+  exList.forEach((ex) => {
+    const e = sess && sess.entries[ex.id];
+    const planned = e ? e.sets.filter((s) => !s.extra) : [];
+    totalSets += Math.max(planned.length, ex.targetSets || 3);
+    filledSets += planned.filter((s) => num(s.r) > 0 || s.skipped).length;
+  });
+  const complete = exList.length > 0 && totalSets > 0 && filledSets >= totalSets;
+
+  const fireCelebration = () => {
+    const who = (data.userName || "champ").trim();
+    const msg = CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)].replace(/\{name\}/g, who);
+    setCelebration({ msg, refeed: day === "Friday" });
+    update((d) => { if (d.sessions[sessionKey]) d.sessions[sessionKey].celebrated = true; });
+  };
+
+  return (
+    <div>
+      {celebration && <Celebration {...celebration} onClose={() => setCelebration(null)} />}
+      <Row style={{ gap: 6, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
+        <button className="ll-chip" disabled={wIdx <= 0} aria-label="previous week"
+          style={{ padding: "6px 11px", opacity: wIdx <= 0 ? 0.35 : 1 }}
+          onClick={() => setWeekOffset(weekOffset - 1)}>‹</button>
+        {DAYS.map((d) => {
+          const st = dayWeekStatus(data, d, wIdx);
+          return (
+            <button key={d} className={`ll-chip ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
+              <DayStatusIcon status={st} />
+              {d.slice(0, 1)}
+            </button>
+          );
+        })}
+        <button className="ll-chip" disabled={wIdx >= maxWeek} aria-label="next week"
+          style={{ padding: "6px 11px", opacity: wIdx >= maxWeek ? 0.35 : 1 }}
+          onClick={() => setWeekOffset(weekOffset + 1)}>›</button>
+      </Row>
+      <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
+        <div>
+          <div className="ll-display" style={{ fontSize: 26, fontWeight: 700 }}>
+            {day} <span style={{ color: T.muted, fontSize: 17, fontWeight: 500 }}>· {fmtDate(dateFor)}</span>
+          </div>
+          <div style={{ color: T.muted, fontSize: 13 }}>
+            Cycle {data.cycleNumber} · Week {wIdx + 1}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
+          </div>
+        </div>
+      </Row>
+      {exList.map((ex) => (
+        <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} />
+      ))}
+      {exList.length > 0 && weekOffset === 0 && (
+        <button disabled={!complete} onClick={fireCelebration}
+          style={{
+            width: "100%", padding: 14, marginTop: 4, fontSize: 15, fontWeight: 700,
+            borderRadius: 12, cursor: complete ? "pointer" : "default", fontFamily: "inherit",
+            background: complete ? T.pos : T.surface2,
+            border: `1px solid ${complete ? T.pos : T.line}`,
+            color: complete ? "#0F1512" : T.faint,
+            opacity: complete ? 1 : 0.65,
+            boxShadow: complete ? "0 0 12px rgba(105,181,109,0.4)" : "none",
+          }}>
+          {complete ? "Finish Workout" : `Finish Workout · ${filledSets}/${totalSets} sets`}
+        </button>
+      )}
+      {exList.length === 0 && (
+        <div style={{ color: T.muted, textAlign: "center", padding: 30 }}>
+          No exercises for {day} yet. Add some in Manage.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Progress view                                                       */
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Cycle grid — the whole cycle at a glance, like the sheet's columns  */
+/* ------------------------------------------------------------------ */
+function CycleGrid({ data, onOpenDay, onGoToday }) {
+  const today = todayISO();
+  const curWeek = Math.max(0, weekOfCycle(data, today));
+  const weeks = Math.max(data.cycleWeeks || 8, curWeek + 1);
+  const cols = Array.from({ length: weeks }, (_, w) => w);
+  const monthOf = (w) =>
+    new Date(addDays(data.cycleStart, w * 7) + "T12:00:00").toLocaleDateString("en-US", { month: "short" });
+  const domOf = (w) => new Date(addDays(data.cycleStart, w * 7) + "T12:00:00").getDate();
+
+  return (
+    <div className="ll-card" style={{ padding: "12px 14px", marginBottom: 14 }}>
+      <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
+        <span className="ll-display" style={{ fontSize: 16, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+          {data.cycleName || `Cycle ${data.cycleNumber}`}
+        </span>
+        <span className="ll-num" style={{ color: T.faint, fontSize: 11.5 }}>week {Math.min(curWeek + 1, weeks)} of {weeks}</span>
+      </Row>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ minWidth: weeks * 30 + 46 }}>
+          <Row style={{ gap: 4 }}>
+            <span style={{ width: 42, flex: "none" }} />
+            {cols.map((w) => (
+              <span key={w} style={{ width: 26, flex: "none", fontSize: 9, color: T.faint, whiteSpace: "nowrap", overflow: "visible" }}>
+                {w === 0 || monthOf(w) !== monthOf(w - 1) ? monthOf(w) : ""}
+              </span>
+            ))}
+          </Row>
+          <Row style={{ gap: 4, marginBottom: 5 }}>
+            <span style={{ width: 42, flex: "none" }} />
+            {cols.map((w) => (
+              <span key={w} style={{ width: 26, flex: "none", textAlign: "center" }}>
+                <span className="ll-num" style={{ display: "block", fontSize: 10, color: w === curWeek ? T.ink : T.faint, fontWeight: w === curWeek ? 700 : 400 }}>{w + 1}</span>
+                <span className="ll-num" style={{ display: "block", fontSize: 8.5, color: T.faint }}>{domOf(w)}</span>
+              </span>
+            ))}
+          </Row>
+          {DAYS.map((d) => (
+            <Row key={d} style={{ gap: 4, marginBottom: 5 }}>
+              <span style={{ width: 42, flex: "none", fontSize: 11, color: T.muted, alignSelf: "center" }}>{d.slice(0, 3)}</span>
+              {cols.map((w) => {
+                const sess = daySessionIn(data, d, w);
+                const dateIso = cellDateFor(data.cycleStart, w, d);
+                let style = {
+                  width: 26, height: 22, flex: "none", borderRadius: 5, padding: 0,
+                  border: `1px solid ${T.line}`, background: "transparent",
+                  color: T.faint, fontSize: 9, cursor: "default", fontFamily: "inherit",
+                };
+                let content = "";
+                let onClick;
+                if (sess) {
+                  let prev = null;
+                  for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
+                  const dv = dayVolume(sess);
+                  const pv = prev ? dayVolume(prev) : null;
+                  if (pv !== null && dv > pv) {
+                    content = "★";
+                    style.fontSize = 13;
+                    style.color = "#F6C851";
+                    style.textShadow = "0 0 7px rgba(246,200,81,0.75)";
+                    style.background = "rgba(246,200,81,0.1)";
+                    style.border = "1px solid rgba(246,200,81,0.4)";
+                  } else if (pv !== null && dv < pv) {
+                    content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.neg, display: "inline-block" }} />;
+                  } else {
+                    content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.pos, display: "inline-block" }} />;
+                  }
+                  style.cursor = "pointer";
+                  onClick = () => onOpenDay(sess.key);
+                } else if (dateIso === today) {
+                  style.border = `2px solid ${T.blue}`;
+                  style.cursor = "pointer";
+                  onClick = () => onGoToday(d);
+                } else if (dateIso < today) {
+                  if (OPTIONAL_DAYS[d]) {
+                    content = "•";
+                    style.opacity = 0.55;
+                  } else {
+                    content = "✕";
+                  }
+                } else {
+                  style.opacity = 0.35;
+                }
+                return (
+                  <button key={w} style={style} onClick={onClick} disabled={!onClick}
+                    title={`${d} · ${fmtDate(dateIso)}`}
+                    aria-label={`${d} ${fmtDate(dateIso)}${sess ? ", open log" : dateIso < today ? ", missed" : ""}`}>
+                    {content}
+                  </button>
+                );
+              })}
+            </Row>
+          ))}
+        </div>
+      </div>
+      <Row style={{ gap: 12, marginTop: 9, flexWrap: "wrap" }}>
+        <Row style={{ gap: 5 }}><span className="ll-star" style={{ fontSize: 12 }}>★</span><span style={{ fontSize: 10.5, color: T.faint }}>beat prev week</span></Row>
+        <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, background: T.neg, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>vol down</span></Row>
+        <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, background: T.pos, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>logged</span></Row>
+        <Row style={{ gap: 5 }}><span style={{ fontSize: 10.5, color: T.faint }}>✕ missed</span></Row>
+        {DAYS.some((d) => OPTIONAL_DAYS[d]) && (
+          <Row style={{ gap: 5 }}><span style={{ fontSize: 10.5, color: T.faint }}>• optional rest</span></Row>
+        )}
+        <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, border: `2px solid ${T.blue}`, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>today</span></Row>
+      </Row>
+    </div>
+  );
+}
+
+function ProgressView({ data, day, setDay, onGoToday }) {
+  const [openEx, setOpenEx] = useState(null);
+  const [openDayKey, setOpenDayKey] = useState(null);
+
+  /* Day log drill-in from the cycle grid */
+  if (openDayKey && data.sessions[openDayKey]) {
+    const sess = data.sessions[openDayKey];
+    const d = sess.day;
+    const w = weekOfCycle(data, sess.date);
+    let prev = null;
+    for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
+    const vol = dayVolume(sess);
+    const delta = prev ? pct(dayVolume(prev), vol) : null;
+    return (
+      <div className="ll-fade">
+        <button className="ll-btn ll-btn-sm" style={{ marginBottom: 12 }} onClick={() => setOpenDayKey(null)}>← Back</button>
+        <Row style={{ justifyContent: "space-between", marginBottom: 2 }}>
+          <div className="ll-display" style={{ fontSize: 24, fontWeight: 700 }}>{d} · {fmtDate(sess.date)}</div>
+          <Delta value={delta} />
+        </Row>
+        <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>
+          Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
+          {prev ? ` · vs week ${weekOfCycle(data, prev.date) + 1}` : ""}
+        </div>
+        {data.exercises.filter((e) => e.day === d).map((ex) => {
+          const e = sess.entries[ex.id];
+          if (!entryHasData(e)) return null;
+          const vName = (ex.variants.find((v) => v.id === e.variantId) || {}).name || "";
+          const evol = volumeOf(e.sets);
+          const prevSame = lastEntryFor(data, ex.id, e.variantId, openDayKey, sess.date);
+          const exDelta = prevSame ? pct(volumeOf(prevSame.entry.sets), evol) : null;
+          const won = exDelta !== null && exDelta > 0;
+          const exStrip = won ? T.pos : exDelta !== null && exDelta < 0 ? T.neg : T.amber;
+          return (
+            <div key={ex.id} className="ll-card" style={{ padding: "11px 13px" }}>
+              <Row style={{ gap: 9, alignItems: "stretch" }}>
+                <span style={{ width: 4, borderRadius: 2, background: exStrip, flex: "none", boxShadow: won ? "0 0 8px rgba(105,181,109,0.7)" : "none" }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Row style={{ justifyContent: "space-between", marginBottom: 4 }}>
+                    <span className="ll-display" style={{ fontSize: 16, fontWeight: 600 }}>
+                      {e.swapName || ex.name}
+                      {e.swapName ? <span style={{ color: T.amber, fontSize: 11.5, marginLeft: 6, fontFamily: "Barlow" }}>swapped</span> : null}
+                    </span>
+                    <Row style={{ gap: 8, flex: "none" }}>
+                      <Delta value={exDelta} />
+                      <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
+                        {evol > 0 ? fmtVol(evol) : `${repsOf(e.sets)} reps`}
+                      </span>
+                    </Row>
+                  </Row>
+                  {vName && vName !== "Usual machine" && (
+                    <div style={{ color: T.muted, fontSize: 12, marginBottom: 3 }}>{vName}</div>
+                  )}
+                  <div className="ll-num" style={{ fontSize: 14.5 }}>{setsLine(e.sets)}</div>
+                  {e.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{e.note}”</div> : null}
+                </div>
+              </Row>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  const exList = data.exercises.filter((e) => e.day === day);
+
+  if (openEx) {
+    const ex = data.exercises.find((e) => e.id === openEx);
+    const hist = historyFor(data, ex.id);
+    const maxVol = Math.max(1, ...hist.map((h) => volumeOf(h.entry.sets)));
+    const rows = hist.map((h, i) => {
+      const vol = volumeOf(h.entry.sets);
+      /* find previous session with the SAME machine for a fair delta */
+      let prevSame = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (hist[j].entry.variantId === h.entry.variantId) { prevSame = hist[j]; break; }
+      }
+      const machineChanged = i > 0 && hist[i - 1].entry.variantId !== h.entry.variantId;
+      return { ...h, vol, delta: prevSame ? pct(volumeOf(prevSame.entry.sets), vol) : null, machineChanged };
+    }).reverse();
+
+    return (
+      <div className="ll-fade">
+        <button className="ll-btn ll-btn-sm" style={{ marginBottom: 12 }} onClick={() => setOpenEx(null)}>← Back</button>
+        <div className="ll-display" style={{ fontSize: 24, fontWeight: 700, marginBottom: 2 }}>{ex.name}</div>
+        <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>
+          {day} · volume = weight × reps, all sets · compared only against the same machine
+        </div>
+        {rows.map((r) => {
+          const vi = ex.variants.findIndex((v) => v.id === r.entry.variantId);
+          const vName = (ex.variants[vi] || { name: "Usual machine" }).name;
+          return (
+            <div key={r.key} className="ll-card" style={{ padding: "11px 13px" }}>
+              <Row style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                <Row style={{ gap: 7 }}>
+                  <span className="ll-num" style={{ fontSize: 13.5, fontWeight: 700 }}>{fmtDate(r.date)}</span>
+                  {ex.variants.length > 1 && (
+                    <Row style={{ gap: 5 }}>
+                      <VariantDot index={Math.max(0, vi)} />
+                      <span style={{ color: T.muted, fontSize: 12 }}>{vName}</span>
+                    </Row>
+                  )}
+                  {r.entry.swapName && <span style={{ color: T.amber, fontSize: 12 }}>did {r.entry.swapName}</span>}
+                </Row>
+                {r.machineChanged && r.delta === null
+                  ? <span style={{ color: T.faint, fontSize: 12 }}>machine changed</span>
+                  : <Delta value={r.delta} />}
+              </Row>
+              <PlateBar frac={r.vol / maxVol} color={T.amber} />
+              <Row style={{ justifyContent: "space-between", marginTop: 7 }}>
+                <span className="ll-num" style={{ color: T.muted, fontSize: 13 }}>{setsLine(r.entry.sets)}</span>
+                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{r.vol > 0 ? fmtVol(r.vol) : `${repsOf(r.entry.sets)} reps`}</span>
+              </Row>
+              {r.entry.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{r.entry.note}”</div> : null}
+            </div>
+          );
+        })}
+        {rows.length === 0 && <div style={{ color: T.muted, textAlign: "center", padding: 30 }}>Nothing logged yet.</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Row style={{ gap: 6, flexWrap: "wrap", padding: "6px 2px 12px" }}>
+        {DAYS.map((d) => {
+          const st = dayWeekStatus(data, d);
+          return (
+            <button key={d} className={`ll-chip ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
+              <DayStatusIcon status={st} />
+              {d.slice(0, 1)}
+            </button>
+          );
+        })}
+      </Row>
+      <div className="ll-display" style={{ fontSize: 26, fontWeight: 700, marginBottom: 2 }}>Progress</div>
+      <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>Week-over-week total volume, same machine only</div>
+      <CycleGrid data={data} onOpenDay={setOpenDayKey} onGoToday={onGoToday} />
+      {exList.map((ex) => {
+        const hist = historyFor(data, ex.id);
+        const last = hist[hist.length - 1];
+        let delta = null;
+        if (last) {
+          for (let j = hist.length - 2; j >= 0; j--) {
+            if (hist[j].entry.variantId === last.entry.variantId) {
+              delta = pct(volumeOf(hist[j].entry.sets), volumeOf(last.entry.sets));
+              break;
+            }
+          }
+        }
+        const mini = hist.slice(-6);
+        const maxV = Math.max(1, ...mini.map((h) => volumeOf(h.entry.sets)));
+        return (
+          <div key={ex.id} className="ll-card" style={{ padding: "12px 14px", cursor: "pointer" }} onClick={() => setOpenEx(ex.id)}>
+            <Row style={{ justifyContent: "space-between" }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="ll-display" style={{ fontSize: 17, fontWeight: 600 }}>{ex.name}</div>
+                <Row style={{ gap: 3, marginTop: 8, alignItems: "flex-end", height: 26 }}>
+                  {mini.map((h, i) => {
+                    const same = last && h.entry.variantId === last.entry.variantId;
+                    return (
+                      <div key={i} style={{
+                        width: 14,
+                        height: Math.max(3, (volumeOf(h.entry.sets) / maxV) * 26),
+                        background: same ? T.amber : T.line,
+                        borderRadius: 2,
+                      }} />
+                    );
+                  })}
+                  {mini.length === 0 && <span style={{ color: T.faint, fontSize: 12 }}>no data</span>}
+                </Row>
+              </div>
+              <div style={{ textAlign: "right", flex: "none" }}>
+                <Delta value={delta} />
+                <div style={{ color: T.faint, fontSize: 11.5, marginTop: 3 }}>vs last time</div>
+              </div>
+            </Row>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Manage view                                                         */
+/* ------------------------------------------------------------------ */
+function ManageView({ data, update, reseed }) {
+  const [confirmCycle, setConfirmCycle] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);
+  const [sheetText, setSheetText] = useState(null);
+
+  const exportSheet = () => {
+    const rows = buildSheetRows(data);
+    try {
+      const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `franco-fit-cycle-${data.cycleNumber}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch { /* fall through to copy option below */ }
+    setSheetText(toTSV(rows));
+  };
+  const [newNames, setNewNames] = useState({});
+  const [editing, setEditing] = useState(null);
+  const [editText, setEditText] = useState("");
+
+  const weekNum = Math.max(1, Math.floor((new Date(todayISO()) - new Date(data.cycleStart)) / (7 * 864e5)) + 1);
+
+  const startNewCycle = () =>
+    update((d) => {
+      d.exercises.forEach((ex) => {
+        const last = lastEntryFor(d, ex.id, null, null);
+        if (last) {
+          const top = Math.max(...last.entry.sets.map((s) => num(s.w)));
+          ex.prev = isFinite(top) ? top : ex.prev;
+        }
+      });
+      d.cycleNumber += 1;
+      d.cycleName = `Cycle ${d.cycleNumber}`;
+      d.cycleStart = todayISO();
+    });
+
+  return (
+    <div>
+      <div className="ll-display" style={{ fontSize: 26, fontWeight: 700, marginBottom: 12 }}>Manage</div>
+
+      {/* Name */}
+      <div className="ll-card" style={{ padding: 14 }}>
+        <div className="ll-display" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Name</div>
+        <input className="ll-input" placeholder="Your name" value={data.userName || ""}
+          onChange={(e) => update((d) => { d.userName = e.target.value; })} />
+      </div>
+
+      {/* Units */}
+      <div className="ll-card" style={{ padding: 14 }}>
+        <Row style={{ justifyContent: "space-between" }}>
+          <div>
+            <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>Units</div>
+            <div style={{ color: T.muted, fontSize: 12.5, marginTop: 2 }}>
+              Label only — your logged numbers never convert.
+            </div>
+          </div>
+          <Row style={{ gap: 6 }}>
+            {["kg", "lb"].map((u) => (
+              <button key={u} className={`ll-chip ${(data.unit || "kg") === u ? "on" : ""}`}
+                style={(data.unit || "kg") === u ? { borderColor: T.amber, color: T.amber } : {}}
+                onClick={() => update((d) => { d.unit = u; })}>
+                {u}
+              </button>
+            ))}
+          </Row>
+        </Row>
+      </div>
+
+      {/* Cycle */}
+      <div className="ll-card" style={{ padding: 14 }}>
+        <div className="ll-display" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Cycle</div>
+        <Row style={{ marginBottom: 8 }}>
+          <input className="ll-input" value={data.cycleName || ""} placeholder="Cycle name (e.g. Summer cut)"
+            onChange={(e) => update((d) => { d.cycleName = e.target.value; })} />
+        </Row>
+        <Row style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+          <span style={{ color: T.muted, fontSize: 13 }}>Length:</span>
+          <button className="ll-btn ll-btn-sm" onClick={() => update((d) => { d.cycleWeeks = Math.max(1, (d.cycleWeeks || 8) - 1); })}>−</button>
+          <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{data.cycleWeeks || 8} wk</span>
+          <button className="ll-btn ll-btn-sm" onClick={() => update((d) => { d.cycleWeeks = (d.cycleWeeks || 8) + 1; })}>+</button>
+          <span style={{ color: T.faint, fontSize: 12.5, marginLeft: "auto" }}>Started {fmtDate(data.cycleStart)} · week {weekNum}</span>
+        </Row>
+        <div style={{ color: T.muted, fontSize: 13, marginBottom: 10 }}>
+          Starting a new cycle saves each exercise's latest top weight as its "last cycle" reference — the number you used to copy into the Prev column.
+        </div>
+        {confirmCycle ? (
+          <Row>
+            <button className="ll-btn ll-btn-chalk" style={{ flex: 1 }} onClick={() => { startNewCycle(); setConfirmCycle(false); }}>
+              Yes, start cycle {data.cycleNumber + 1}
+            </button>
+            <button className="ll-btn" onClick={() => setConfirmCycle(false)}>Cancel</button>
+          </Row>
+        ) : (
+          <button className="ll-btn" onClick={() => setConfirmCycle(true)}>Start new cycle</button>
+        )}
+      </div>
+
+      {/* Schedule */}
+      {DAYS.map((day) => (
+        <div key={day} className="ll-card" style={{ padding: 14 }}>
+          <Row style={{ gap: 8, marginBottom: 10 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 5, background: DAY_COLOR[day] }} />
+            <span className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>{day}</span>
+          </Row>
+          {data.exercises.filter((e) => e.day === day).map((ex, i, arr) => (
+            <Row key={ex.id} style={{ justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
+              {editing === ex.id ? (
+                <div style={{ flex: 1 }}>
+                  <Row>
+                    <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
+                    <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                      const t = editText.trim();
+                      if (t) update((d) => { d.exercises.find((x) => x.id === ex.id).name = t; });
+                      setEditing(null);
+                    }}>Done</button>
+                  </Row>
+                  <Row style={{ marginTop: 6, gap: 8 }}>
+                    <span style={{ color: T.muted, fontSize: 13 }}>Planned sets:</span>
+                    <button className="ll-btn ll-btn-sm" onClick={() =>
+                      update((d) => { const x = d.exercises.find((x) => x.id === ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
+                    <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{ex.targetSets || 3}</span>
+                    <button className="ll-btn ll-btn-sm" onClick={() =>
+                      update((d) => { const x = d.exercises.find((x) => x.id === ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
+                  </Row>
+                </div>
+              ) : (
+                <>
+                  <span style={{ fontSize: 15 }}>
+                    {ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
+                  </span>
+                  <Row style={{ gap: 4 }}>
+                    <button className="ll-btn ll-btn-sm" disabled={i === 0} style={{ opacity: i === 0 ? 0.35 : 1 }}
+                      onClick={() => update((d) => {
+                        const list = d.exercises;
+                        const idxA = list.findIndex((x) => x.id === ex.id);
+                        const idxB = list.findIndex((x) => x.id === arr[i - 1].id);
+                        [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
+                      })}>↑</button>
+                    <button className="ll-btn ll-btn-sm" disabled={i === arr.length - 1} style={{ opacity: i === arr.length - 1 ? 0.35 : 1 }}
+                      onClick={() => update((d) => {
+                        const list = d.exercises;
+                        const idxA = list.findIndex((x) => x.id === ex.id);
+                        const idxB = list.findIndex((x) => x.id === arr[i + 1].id);
+                        [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
+                      })}>↓</button>
+                    <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(ex.id); setEditText(ex.name); }}>✎</button>
+                    <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+                      onClick={() => update((d) => { d.exercises = d.exercises.filter((x) => x.id !== ex.id); })}>✕</button>
+                  </Row>
+                </>
+              )}
+            </Row>
+          ))}
+          <Row style={{ marginTop: 10 }}>
+            <input className="ll-input" placeholder="Add exercise…" value={newNames[day] || ""}
+              onChange={(e) => setNewNames({ ...newNames, [day]: e.target.value })} />
+            <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+              const name = (newNames[day] || "").trim();
+              if (!name) return;
+              update((d) => {
+                d.exercises.push({
+                  id: slug(`${day}-${Date.now()}-${name}`),
+                  day, name, prev: null, targetSets: 3,
+                  variants: [{ id: "main", name: "Usual machine" }],
+                  activeVariant: "main",
+                });
+              });
+              setNewNames({ ...newNames, [day]: "" });
+            }}>Add</button>
+          </Row>
+        </div>
+      ))}
+
+      {/* Backup / reset */}
+      <div className="ll-card" style={{ padding: 14 }}>
+        <div className="ll-display" style={{ fontSize: 18, fontWeight: 600, marginBottom: 10 }}>Data</div>
+        <Row style={{ marginBottom: 10 }}>
+          <button className="ll-btn ll-btn-chalk" style={{ flex: 1 }} onClick={exportSheet}>
+            Export sheet (CSV)
+          </button>
+        </Row>
+        {sheetText !== null && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 6 }}>
+              Download started. If it didn't, tap the box below to select everything, copy, and paste straight into a blank Google Sheet — columns split automatically.
+            </div>
+            <textarea className="ll-input" readOnly rows={5} value={sheetText} onFocus={(e) => e.target.select()} />
+          </div>
+        )}
+        <Row style={{ marginBottom: 10 }}>
+          <button className="ll-btn" style={{ flex: 1 }} onClick={() => setShowBackup(!showBackup)}>
+            {showBackup ? "Hide backup" : "Show backup (copyable JSON)"}
+          </button>
+        </Row>
+        {showBackup && (
+          <textarea className="ll-input" readOnly rows={6} value={JSON.stringify(data)} onFocus={(e) => e.target.select()} />
+        )}
+        <div style={{ marginTop: 10 }}>
+          {confirmReset ? (
+            <Row>
+              <button className="ll-btn" style={{ flex: 1, color: T.neg }} onClick={() => { reseed(); setConfirmReset(false); }}>
+                Yes, wipe everything and start fresh
+              </button>
+              <button className="ll-btn" onClick={() => setConfirmReset(false)}>Cancel</button>
+            </Row>
+          ) : (
+            <button className="ll-btn ll-btn-sm" style={{ color: T.neg }} onClick={() => setConfirmReset(true)}>Reset app</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Rest timer — lives in the tab bar, styled apart from the text tabs  */
+/* ------------------------------------------------------------------ */
+function RestTimer() {
+  const [startTs, setStartTs] = useState(null);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!startTs) return;
+    const iv = setInterval(() => tick((n) => n + 1), 500);
+    return () => clearInterval(iv);
+  }, [startTs]);
+
+  const secs = startTs ? Math.floor((Date.now() - startTs) / 1000) : 0;
+  const m = Math.floor(secs / 60);
+  const s = String(secs % 60).padStart(2, "0");
+  const long = secs >= 90;
+
+  return (
+    <div className="ll-resttab">
+      {startTs ? (
+        <div className={`ll-restpill on ${long ? "long" : ""}`}>
+          <button className="ll-restmain ll-num" onClick={() => setStartTs(Date.now())} aria-label="restart rest timer">
+            {m}:{s}
+          </button>
+          <button className="ll-reststop" aria-label="stop rest timer" onClick={() => setStartTs(null)}>✕</button>
+        </div>
+      ) : (
+        <button className="ll-restpill" onClick={() => setStartTs(Date.now())} aria-label="start rest timer">⏱ REST</button>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* First-run name popup                                                */
+/* ------------------------------------------------------------------ */
+function NamePopup({ onSave, onSkip }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="ll-celebrate" style={{ zIndex: 120 }}>
+      <div className="ll-card" style={{ padding: 20, width: "100%", maxWidth: 340, textAlign: "left" }}>
+        <div className="ll-display" style={{ fontSize: 24, fontWeight: 700, marginBottom: 6 }}>Welcome to Franco Fit</div>
+        <div style={{ color: T.muted, fontSize: 13.5, marginBottom: 12 }}>
+          What should we call you
+        </div>
+        <input className="ll-input" autoFocus placeholder="Your name" value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onSave(name.trim()); }} />
+        <Row style={{ marginTop: 12 }}>
+          <button className="ll-btn ll-btn-chalk" style={{ flex: 1, opacity: name.trim() ? 1 : 0.5 }} disabled={!name.trim()}
+            onClick={() => onSave(name.trim())}>Let's go</button>
+          <button className="ll-btn" onClick={onSkip}>Later</button>
+        </Row>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* App                                                                 */
+/* ------------------------------------------------------------------ */
+const window_storage = {
+  async get(k) { const v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; },
+  async set(k, v) { localStorage.setItem(k, v); return { key: k, value: v }; },
+};
+
+/* Version A starts fresh with Alicia's routine */
+function freshSeed() {
+  const d = buildSeed();
+  d.sessions = {};
+  d.cycleNumber = 1;
+  d.cycleName = "Cycle 1";
+  d.cycleStart = todayISO();
+  d.unit = "lb";
+  d.userName = "Alicia";
+  d.nameAsked = true;
+  return d;
+}
+
+const STORAGE_KEY = "franco-fit-a-v2";
+
+function App() {
+  const [data, setData] = useState(null);
+  const [tab, setTab] = useState("today");
+  const [day, setDay] = useState(defaultDay());
+  const [saveState, setSaveState] = useState("saved");
+  const [loadError, setLoadError] = useState(false);
+  const timer = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window_storage.get(STORAGE_KEY);
+        if (res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (!parsed.unit) parsed.unit = "kg";
+          if (!parsed.cycleWeeks) parsed.cycleWeeks = 8;
+          if (!parsed.cycleName) parsed.cycleName = `Cycle ${parsed.cycleNumber || 1}`;
+          if (parsed.userName === undefined) { parsed.userName = ""; parsed.nameAsked = false; }
+          setData(parsed);
+          return;
+        }
+        throw new Error("empty");
+      } catch {
+        const seed = freshSeed();
+        setData(seed);
+        try { await window_storage.set(STORAGE_KEY, JSON.stringify(seed)); }
+        catch { setLoadError(true); }
+      }
+    })();
+  }, []);
+
+  const scheduleSave = (next) => {
+    setSaveState("saving");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      try {
+        await window_storage.set(STORAGE_KEY, JSON.stringify(next));
+        setSaveState("saved");
+      } catch {
+        setSaveState("error");
+      }
+    }, 800);
+  };
+
+  const update = (fn) => {
+    setData((prev) => {
+      const next = structuredClone(prev);
+      fn(next);
+      scheduleSave(next);
+      return next;
+    });
+  };
+
+  const reseed = () => {
+    const seed = freshSeed();
+    setData(seed);
+    scheduleSave(seed);
+  };
+
+  if (!data) {
+    return (
+      <div className="ll-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+        <style>{CSS}</style>
+        <span className="ll-display" style={{ color: T.muted, fontSize: 18, letterSpacing: "0.15em" }}>LOADING…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ll-root">
+      <style>{CSS}</style>
+      <div className="ll-shell">
+        <Row style={{ justifyContent: "space-between", padding: "18px 0 14px" }}>
+          <Row style={{ gap: 10, alignItems: "baseline" }}>
+            <span className="ll-display" style={{ fontSize: 17, fontWeight: 700, letterSpacing: "0.18em" }}>FRANCO FIT</span>
+            <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>
+              {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+            </span>
+          </Row>
+          <span style={{ fontSize: 11.5, color: saveState === "error" ? T.neg : T.faint }} className="ll-num">
+            {saveState === "saving" ? "saving…" : saveState === "error" ? "save failed — retry by editing" : "saved"}
+          </span>
+        </Row>
+        {loadError && <div className="ll-note" style={{ marginBottom: 10 }}>This browser is blocking storage — logs won't persist. Avoid private/incognito mode.</div>}
+        {tab === "today" && <TodayView data={data} update={update} day={day} setDay={setDay} />}
+        {tab === "progress" && (
+          <ProgressView data={data} day={day} setDay={setDay}
+            onGoToday={(d) => { setDay(d); setTab("today"); }} />
+        )}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} />}
+      </div>
+      <nav className="ll-tabbar">
+        {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (
+          <button key={id} className={`ll-tab ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>
+            {label}
+            <div className="ll-tabline" />
+          </button>
+        ))}
+        <RestTimer />
+      </nav>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
