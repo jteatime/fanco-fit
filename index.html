@@ -8,6 +8,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<meta name="apple-mobile-web-app-title" content="Franco Fit" />
 <style>html, body { margin: 0; background: #141518; }</style>
 </head>
 <body>
@@ -59,6 +66,8 @@ const CSS = `
 .ll-step:active { transform: scale(0.94); }
 .ll-input { background: ${T.bg}; border: 1px solid ${T.line}; border-radius: 10px; color: ${T.ink}; padding: 9px 10px; font-size: 16px; width: 100%; font-family: inherit; box-sizing: border-box; }
 .ll-input:focus { outline: none; border-color: ${T.muted}; }
+.ll-input::placeholder { color: #565B63; font-style: italic; opacity: 1; }
+.ll-reps::placeholder { color: #565B63; font-style: italic; }
 .ll-setnum { width: 64px; text-align: center; font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 .ll-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid ${T.line}; background: ${T.surface2}; color: ${T.muted}; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .ll-chip.on { color: ${T.ink}; border-color: ${T.muted}; background: ${T.surface}; }
@@ -66,6 +75,7 @@ const CSS = `
 .ll-chip.starred.on { border-color: rgba(246,200,81,0.9); box-shadow: 0 0 11px rgba(246,200,81,0.5); color: ${T.ink}; }
 .ll-chip.optional { border-style: dashed; color: ${T.faint}; }
 .ll-chip.optional.on { color: ${T.ink}; border-color: ${T.muted}; }
+.ll-chip.ll-day { padding: 5px 9px; gap: 4px; font-size: 12.5px; flex: none; }
 .ll-tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: ${T.surface}; border-top: 1px solid ${T.line}; display: flex; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
 .ll-tab { flex: 1; padding: 13px 0 11px; text-align: center; color: ${T.faint}; font-weight: 600; font-size: 13px; cursor: pointer; border: none; background: none; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; }
 .ll-tab.on { color: ${T.ink}; }
@@ -652,7 +662,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
             </div>
           </Row>
           <Row style={{ gap: 8, flex: "none" }}>
-            {exFilled > 0 && (
+            {exTotal > 0 && (
               <span className="ll-num" style={{ color: exComplete ? T.pos : T.faint, fontSize: 12, fontWeight: 700 }}>
                 {exFilled}/{exTotal}{exComplete ? " ✓" : ""}
               </span>
@@ -988,21 +998,21 @@ function TodayView({ data, update, day, setDay }) {
   return (
     <div>
       {celebration && <Celebration {...celebration} onClose={() => setCelebration(null)} />}
-      <Row style={{ gap: 6, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
-        <button className="ll-chip" disabled={wIdx <= 0} aria-label="previous week"
-          style={{ padding: "6px 11px", opacity: wIdx <= 0 ? 0.35 : 1 }}
+      <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
+        <button className="ll-chip ll-day" disabled={wIdx <= 0} aria-label="previous week"
+          style={{ opacity: wIdx <= 0 ? 0.35 : 1 }}
           onClick={() => setWeekOffset(weekOffset - 1)}>‹</button>
         {DAYS.map((d) => {
           const st = dayWeekStatus(data, d, wIdx);
           return (
-            <button key={d} className={`ll-chip ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
-              <DayStatusIcon status={st} />
+            <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
+              <DayStatusIcon status={st} size={7} />
               {d.slice(0, 1)}
             </button>
           );
         })}
-        <button className="ll-chip" disabled={wIdx >= maxWeek} aria-label="next week"
-          style={{ padding: "6px 11px", opacity: wIdx >= maxWeek ? 0.35 : 1 }}
+        <button className="ll-chip ll-day" disabled={wIdx >= maxWeek} aria-label="next week"
+          style={{ opacity: wIdx >= maxWeek ? 0.35 : 1 }}
           onClick={() => setWeekOffset(weekOffset + 1)}>›</button>
       </Row>
       <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
@@ -1278,12 +1288,12 @@ function ProgressView({ data, day, setDay, onGoToday }) {
 
   return (
     <div>
-      <Row style={{ gap: 6, flexWrap: "wrap", padding: "6px 2px 12px" }}>
+      <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px" }}>
         {DAYS.map((d) => {
           const st = dayWeekStatus(data, d);
           return (
-            <button key={d} className={`ll-chip ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
-              <DayStatusIcon status={st} />
+            <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`} onClick={() => setDay(d)}>
+              <DayStatusIcon status={st} size={7} />
               {d.slice(0, 1)}
             </button>
           );
