@@ -1030,20 +1030,24 @@ function TodayView({ data, update, day, setDay }) {
       {exList.map((ex) => (
         <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} />
       ))}
-      {exList.length > 0 && weekOffset === 0 && (
-        <button disabled={!complete} onClick={fireCelebration}
-          style={{
-            width: "100%", padding: 14, marginTop: 4, fontSize: 15, fontWeight: 700,
-            borderRadius: 12, cursor: complete ? "pointer" : "default", fontFamily: "inherit",
-            background: complete ? T.pos : T.surface2,
-            border: `1px solid ${complete ? T.pos : T.line}`,
-            color: complete ? "#0F1512" : T.faint,
-            opacity: complete ? 1 : 0.65,
-            boxShadow: complete ? "0 0 12px rgba(105,181,109,0.4)" : "none",
-          }}>
-          {complete ? "Finish Workout" : `Finish Workout · ${filledSets}/${totalSets} sets`}
-        </button>
-      )}
+      {exList.length > 0 && weekOffset === 0 && (() => {
+        const done = !!(sess && sess.celebrated);
+        const ready = complete && !done;
+        return (
+          <button disabled={!ready} onClick={fireCelebration}
+            style={{
+              width: "100%", padding: 14, marginTop: 4, fontSize: 15, fontWeight: 700,
+              borderRadius: 12, cursor: ready ? "pointer" : "default", fontFamily: "inherit",
+              background: ready ? T.pos : done ? "rgba(105,181,109,0.15)" : T.surface2,
+              border: `1px solid ${ready ? T.pos : done ? "rgba(105,181,109,0.45)" : T.line}`,
+              color: ready ? "#0F1512" : done ? T.pos : T.faint,
+              opacity: ready || done ? 1 : 0.65,
+              boxShadow: ready ? "0 0 12px rgba(105,181,109,0.4)" : "none",
+            }}>
+            {done ? "★ Workout finished" : ready ? "Finish Workout" : `Finish Workout · ${filledSets}/${totalSets} sets`}
+          </button>
+        );
+      })()}
       {exList.length === 0 && (
         <div style={{ color: T.muted, textAlign: "center", padding: 30 }}>
           No exercises for {day} yet. Add some in Manage.
