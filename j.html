@@ -46,9 +46,12 @@ const THEMES = {
   underwater: { label: "Underwater", colors: { bg: "#0E161D", surface: "#152230", surface2: "#1C2C3C", line: "#28394A", blue: "#4FC3F7" } },
   neon: { label: "Neon", colors: { bg: "#141220", surface: "#1C1930", surface2: "#251F3E", line: "#332C52", blue: "#B388FF" } },
   jungle: { label: "Jungle", colors: { bg: "#12160F", surface: "#1A211A", surface2: "#232C22", line: "#303C2E", blue: "#B7CFA0" } },
+  rainbow: { label: "Rainbow", colors: { bg: "#201219", surface: "#2A1A23", surface2: "#33202B", line: "#452F3D", blue: "#E58FC4" } },
 };
+let CURRENT_THEME = "iron";
 function applyTheme(id) {
   const th = THEMES[id] || THEMES.iron;
+  CURRENT_THEME = THEMES[id] ? id : "iron";
   Object.assign(T, BASE_T, th.colors);
 }
 
@@ -63,15 +66,23 @@ const REWARDS = [
   { id: "bolt", char: "⚡", color: "#F6C851" },
   { id: "crown", char: "👑", color: "#F6C851" },
   { id: "muscle", char: "💪", color: "#F6C851" },
+  { id: "unicorn", char: "🦄", color: "#E7A6F0" },
+  { id: "blue-star", char: "★", color: "#5B9DFF" },
+  { id: "blue-heart", char: "♥", color: "#5B9DFF" },
+  { id: "pink-star", char: "★", color: "#F48FB1" },
+  { id: "rainbow-star", char: "★", color: "#C77DFF", rainbow: true },
 ];
 const rewardOf = (data) => REWARDS.find((r) => r.id === (data && data.rewardId)) || REWARDS[0];
+const RAINBOW_GRAD = "linear-gradient(135deg, #FF5FA2 0%, #FFC371 18%, #C77DFF 33%, #4FC3F7 46%, #FF5FA2 60%, #FF8FC0 74%, #FFC371 87%, #C77DFF 100%)";
+const rainbowText = () => ({
+  backgroundImage: RAINBOW_GRAD, WebkitBackgroundClip: "text", backgroundClip: "text",
+  color: "transparent", WebkitTextFillColor: "transparent",
+});
 const RewardGlyph = ({ data, size = 13 }) => {
   const r = rewardOf(data);
-  return (
-    <span style={{ fontSize: size, lineHeight: 1, flex: "none", color: r.color, filter: `drop-shadow(0 0 5px ${r.color}99)` }}>
-      {r.char}
-    </span>
-  );
+  const st = { fontSize: size, lineHeight: 1, flex: "none", color: r.color, filter: `drop-shadow(0 0 5px ${r.color}99)` };
+  if (r.rainbow) Object.assign(st, rainbowText());
+  return <span style={st}>{r.char}</span>;
 };
 const WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
@@ -92,6 +103,7 @@ function applySchedule(refeedDay) {
   OPTIONAL_DAYS = { [WEEK[(r + 2) % 7]]: true, [WEEK[(r + 5) % 7]]: true };
 }
 
+const RAINBOW_CSS = `.ll-card { background-image: linear-gradient(90deg, #FF5FA2 0%, #FFC371 18%, #C77DFF 33%, #4FC3F7 46%, #FF5FA2 60%, #FF8FC0 74%, #FFC371 87%, #C77DFF 100%); background-size: 100% 3px; background-repeat: no-repeat; background-position: top; }`;
 const buildCSS = () => `
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
 html, body { scrollbar-width: none; -ms-overflow-style: none; }
@@ -149,6 +161,7 @@ textarea.ll-input { resize: vertical; min-height: 44px; font-size: 15px; }
 @media (prefers-reduced-motion: reduce) { .ll-confetti { display: none; } }
 .ll-restmain { background: none; border: none; color: inherit; font-weight: 800; font-size: 14px; cursor: pointer; padding: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .ll-reststop { background: rgba(0,0,0,0.2); border: none; color: inherit; width: 18px; height: 18px; border-radius: 9px; font-size: 10px; cursor: pointer; flex: none; }
+${CURRENT_THEME === "rainbow" ? RAINBOW_CSS : ""}
 `;
 
 /* ------------------------------------------------------------------ */
@@ -944,7 +957,12 @@ function Celebration({ msg, refeed, reward, onClose }) {
           animation: `llburst ${p.dur}s cubic-bezier(0.16, 0.9, 0.35, 1) ${p.delay}s forwards`,
         }} />
       ))}
-      <span style={{ fontSize: 46, lineHeight: 1, color: (reward && reward.color) || "#F6C851", filter: `drop-shadow(0 0 9px ${((reward && reward.color) || "#F6C851")}99)` }}>{(reward && reward.char) || "★"}</span>
+      {(() => {
+        const rc = (reward && reward.color) || "#F6C851";
+        const st = { fontSize: 46, lineHeight: 1, color: rc, filter: `drop-shadow(0 0 9px ${rc}99)` };
+        if (reward && reward.rainbow) Object.assign(st, rainbowText());
+        return <span style={st}>{(reward && reward.char) || "★"}</span>;
+      })()}
       <div className="ll-display" style={{ fontSize: 38, fontWeight: 700, marginTop: 12, lineHeight: 1.1 }}>{msg}</div>
       {refeed && (
         <div className="ll-display" style={{ fontSize: 22, fontWeight: 600, color: T.amber, marginTop: 14 }}>
@@ -1164,10 +1182,14 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                   } else if (pv !== null && dv > pv) {
                     content = rw.char;
                     style.fontSize = 13;
-                    style.color = rw.color;
                     style.filter = `drop-shadow(0 0 5px ${rw.color}99)`;
-                    style.background = `${rw.color}1A`;
                     style.border = `1px solid ${rw.color}66`;
+                    if (rw.rainbow) {
+                      Object.assign(style, rainbowText());
+                    } else {
+                      style.color = rw.color;
+                      style.background = `${rw.color}1A`;
+                    }
                   } else if (pv !== null && dv < pv) {
                     content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.neg, display: "inline-block" }} />;
                   } else {
@@ -1532,7 +1554,7 @@ function ManageView({ data, update, reseed, restore }) {
         <Row style={{ gap: 5, flexWrap: "wrap" }}>
           {REWARDS.map((r) => (
             <button key={r.id} className={`ll-chip ll-day ${rewardOf(data).id === r.id ? "on" : ""}`}
-              style={{ color: r.color, fontSize: 15, ...(rewardOf(data).id === r.id ? { borderColor: r.color, boxShadow: `0 0 8px ${r.color}59` } : {}) }}
+              style={{ color: r.color, fontSize: 15, ...(r.rainbow ? rainbowText() : {}), ...(rewardOf(data).id === r.id ? { borderColor: r.color, boxShadow: `0 0 8px ${r.color}59` } : {}) }}
               onClick={() => update((d) => { d.rewardId = r.id; })}>
               {r.char}
             </button>
