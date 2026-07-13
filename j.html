@@ -161,6 +161,15 @@ textarea.ll-input { resize: vertical; min-height: 44px; font-size: 15px; }
 @media (prefers-reduced-motion: reduce) { .ll-confetti { display: none; } }
 .ll-restmain { background: none; border: none; color: inherit; font-weight: 800; font-size: 14px; cursor: pointer; padding: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .ll-reststop { background: rgba(0,0,0,0.2); border: none; color: inherit; width: 18px; height: 18px; border-radius: 9px; font-size: 10px; cursor: pointer; flex: none; }
+@keyframes llpop { 0% { transform: scale(1); } 45% { transform: scale(1.2); box-shadow: 0 0 14px rgba(105,181,109,0.85); } 100% { transform: scale(1); } }
+.ll-reps.good { animation: llpop 0.35s ease; }
+@keyframes llboxin { 0% { transform: scale(0.2); opacity: 0.2; } 60% { transform: scale(1.35); } 100% { transform: scale(1); opacity: 1; } }
+.ll-boxin { animation: llboxin 0.3s ease both; }
+@keyframes llcharge { 0% { transform: scale(1); } 45% { transform: scale(1.035); box-shadow: 0 0 28px rgba(105,181,109,0.9); } 100% { transform: scale(1); } }
+.ll-charge { animation: llcharge 0.7s ease; }
+@keyframes llmini { to { transform: translate(var(--mx), var(--my)) rotate(var(--mr)); opacity: 0; } }
+.ll-mini { position: absolute; left: 10px; top: 16px; width: 6px; height: 9px; border-radius: 2px; animation: llmini 0.8s ease-out forwards; pointer-events: none; z-index: 5; }
+@media (prefers-reduced-motion: reduce) { .ll-reps.good, .ll-boxin, .ll-charge, .ll-mini { animation: none; } }
 ${CURRENT_THEME === "rainbow" ? RAINBOW_CSS : ""}
 `;
 
@@ -664,15 +673,36 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
     ? T.line
     : skippedAll ? "#565B63" : beating ? T.pos : liveDelta !== null && liveDelta < 0 ? T.neg : T.amber;
 
+  const [burst, setBurst] = useState(null);
+  const prevCompleteRef = useRef(exComplete);
+  useEffect(() => {
+    if (!prevCompleteRef.current && exComplete && !skippedAll && beating) {
+      setBurst(Array.from({ length: 9 }, () => ({
+        mx: 18 + Math.random() * 80,
+        my: -(16 + Math.random() * 48),
+        mr: 180 + Math.random() * 420,
+      })));
+      setTimeout(() => setBurst(null), 900);
+    }
+    prevCompleteRef.current = exComplete;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exComplete]);
+
   const bodyweight = lastSame && volumeOf(lastSame.entry.sets) === 0 && repsOf(lastSame.entry.sets) > 0;
 
   return (
-    <div className="ll-card">
+    <div className="ll-card" style={{ position: "relative" }}>
+      {burst && burst.map((p, i) => (
+        <span key={i} className="ll-mini" style={{
+          background: i % 3 === 0 ? rewardOf(data).color : i % 3 === 1 ? T.pos : "#EDEEE9",
+          "--mx": `${p.mx}px`, "--my": `${p.my}px`, "--mr": `${p.mr}deg`,
+        }} />
+      ))}
       {/* header */}
       <div onClick={() => setOpen(!open)} style={{ padding: "13px 14px", cursor: "pointer" }}>
         <Row style={{ justifyContent: "space-between" }}>
           <Row style={{ gap: 9, minWidth: 0 }}>
-            <span style={{ width: 4, alignSelf: "stretch", minHeight: 20, borderRadius: 2, background: stripColor, flex: "none", boxShadow: beating ? "0 0 8px rgba(105,181,109,0.7)" : "none" }} />
+            <span style={{ width: 4, alignSelf: "stretch", minHeight: 20, borderRadius: 2, background: stripColor, flex: "none", boxShadow: beating ? "0 0 8px rgba(105,181,109,0.7)" : "none", transition: "background-color 0.5s ease, box-shadow 0.5s ease" }} />
             <div style={{ minWidth: 0 }}>
               <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>
                 {ex.icon ? <span style={{ marginRight: 7 }}>{ex.icon}</span> : null}
@@ -694,7 +724,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                   const s2 = plannedToday[i];
                   const fill = skippedAll ? "#565B63" : s2 && num(s2.r) > 0 ? T.pos : s2 && s2.skipped ? "#565B63" : null;
                   return (
-                    <span key={i} style={{ width: 9, height: 9, borderRadius: 2, flex: "none", background: fill || "transparent", border: fill ? "none" : `1px solid ${T.line}` }} />
+                    <span key={i} className={fill ? "ll-boxin" : ""} style={{ width: 9, height: 9, borderRadius: 2, flex: "none", background: fill || "transparent", border: fill ? "none" : `1px solid ${T.line}`, animationDelay: `${i * 45}ms` }} />
                   );
                 })}
                 {todaySets.filter((s2) => s2.extra && num(s2.r) > 0).map((s2, i) => (
@@ -923,10 +953,10 @@ const CELEBRATIONS = [
   "Gravity filed a complaint.",
 ];
 
-function Celebration({ msg, refeed, reward, onClose }) {
+function Celebration({ msg, refeed, reward, record, finale, onClose }) {
   const pieces = useMemo(
     () =>
-      Array.from({ length: 140 }, (_, i) => {
+      Array.from({ length: finale ? 240 : 140 }, (_, i) => {
         const fromLeft = i % 2 === 0;
         return {
           fromLeft,
@@ -934,7 +964,9 @@ function Celebration({ msg, refeed, reward, onClose }) {
           ty: -(35 + Math.random() * 62),
           w: 5 + Math.random() * 6,
           h: 8 + Math.random() * 9,
-          color: ["#F6C851", "#69B56D", "#5B9DFF", "#D96A5B", "#EDEEE9"][i % 5],
+          color: record || finale
+            ? [((reward && reward.color) || "#F6C851"), "#EDEEE9", ((reward && reward.color) || "#F6C851")][i % 3]
+            : ["#F6C851", "#69B56D", "#5B9DFF", "#D96A5B", "#EDEEE9"][i % 5],
           dur: 2.2 + Math.random() * 1.7,
           delay: Math.random() * 2.8,
           rot: 360 + Math.random() * 720,
@@ -964,6 +996,21 @@ function Celebration({ msg, refeed, reward, onClose }) {
         return <span style={st}>{(reward && reward.char) || "★"}</span>;
       })()}
       <div className="ll-display" style={{ fontSize: 38, fontWeight: 700, marginTop: 12, lineHeight: 1.1 }}>{msg}</div>
+      {record && !finale && (
+        <div className="ll-display" style={{ fontSize: 19, fontWeight: 700, letterSpacing: "0.14em", marginTop: 10, color: (reward && reward.color) || "#F6C851" }}>
+          NEW WEEKLY RECORD
+        </div>
+      )}
+      {finale && (
+        <div style={{ marginTop: 16, background: "rgba(0,0,0,0.4)", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 18px", maxWidth: 320 }}>
+          <div className="ll-display" style={{ fontSize: 16, letterSpacing: "0.14em", color: (reward && reward.color) || "#F6C851", marginBottom: 6 }}>CYCLE COMPLETE</div>
+          <div style={{ fontSize: 13.5, color: T.ink, lineHeight: 1.5 }}>
+            Total volume <span className="ll-num">{fmtVol(finale.vol)}</span> · {finale.wins} winning days
+            {finale.best ? ` · Most improved: ${finale.best.name} +${Math.round(finale.best.pctv)}%` : ""}
+          </div>
+          <div style={{ fontSize: 12, color: T.faint, marginTop: 4 }}>≈ {finale.trucks} pickup trucks lifted this cycle</div>
+        </div>
+      )}
       {refeed && (
         <div className="ll-display" style={{ fontSize: 22, fontWeight: 600, color: T.amber, marginTop: 14 }}>
           Enjoy the REFEED! You earned it!
@@ -1017,13 +1064,66 @@ function TodayView({ data, update, day, setDay }) {
       d.sessions[sessionKey].startedAt = Date.now();
     });
 
+  const doneOuter = !!(sess && sess.celebrated);
+  const [charging, setCharging] = useState(false);
+  const prevReadyRef = useRef(false);
+  useEffect(() => {
+    const readyNow = complete && !doneOuter;
+    if (readyNow && !prevReadyRef.current) {
+      setCharging(true);
+      setTimeout(() => setCharging(false), 800);
+    }
+    prevReadyRef.current = readyNow;
+  }, [complete, doneOuter]);
+
   const fireCelebration = () => {
     const who = (data.userName || "champ").trim();
     const msg = CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)].replace(/\{name\}/g, who);
     const preRefeed = data.refeedDay
       ? day === WEEK[(WEEK.indexOf(data.refeedDay) + 6) % 7]
       : day === "Friday";
-    setCelebration({ msg, refeed: preRefeed, reward: rewardOf(data) });
+
+    /* Record day: today's volume beats this day's previous week */
+    let record = false;
+    if (sess) {
+      const wNow = weekOfCycle(data, sess.date);
+      let prevDay = null;
+      for (let k = wNow - 1; k >= 0; k--) { const p = daySessionIn(data, day, k); if (p) { prevDay = p; break; } }
+      record = !!(prevDay && dayVolume(sess) > dayVolume(prevDay));
+    }
+
+    /* Cycle finale: this finish closes out the final week's schedule */
+    let finale = null;
+    const finalW = (data.cycleWeeks || 8) - 1;
+    if (wIdx === finalW && DAYS.every((dd) => OPTIONAL_DAYS[dd] || dd === day || daySessionIn(data, dd, wIdx))) {
+      const inCycle = sortedSessions(data).filter((x) => weekOfCycle(data, x.date) >= 0);
+      const vol = inCycle.reduce((a, x) => a + dayVolume(x), 0);
+      let wins = 0;
+      DAYS.forEach((dd) => {
+        for (let wi = 0; wi <= finalW; wi++) {
+          const sx = daySessionIn(data, dd, wi);
+          if (!sx) continue;
+          let pv = null;
+          for (let k = wi - 1; k >= 0; k--) { const p = daySessionIn(data, dd, k); if (p) { pv = p; break; } }
+          if (pv && dayVolume(sx) > dayVolume(pv)) wins += 1;
+        }
+      });
+      let best = null;
+      data.exercises.forEach((ex) => {
+        const h = historyFor(data, ex.id).filter((x) => weekOfCycle(data, x.date) >= 0);
+        if (h.length >= 2) {
+          const v0 = volumeOf(h[0].entry.sets), v1 = volumeOf(h[h.length - 1].entry.sets);
+          if (v0 > 0) {
+            const p = ((v1 - v0) / v0) * 100;
+            if (!best || p > best.pctv) best = { name: ex.name, pctv: p };
+          }
+        }
+      });
+      const per = data.unit === "lb" ? 4000 : 1800;
+      finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)) };
+    }
+
+    setCelebration({ msg, refeed: preRefeed, reward: rewardOf(data), record, finale });
     update((d) => {
       if (d.sessions[sessionKey]) {
         d.sessions[sessionKey].celebrated = true;
@@ -1086,7 +1186,7 @@ function TodayView({ data, update, day, setDay }) {
           ? Math.max(1, Math.round((sess.finishedAt - sess.startedAt) / 60000))
           : null;
         return (
-          <button disabled={!ready} onClick={fireCelebration}
+          <button disabled={!ready} onClick={fireCelebration} className={charging && ready ? "ll-charge" : ""}
             style={{
               width: "100%", padding: 14, marginTop: 4, fontSize: 15, fontWeight: 700,
               borderRadius: 12, cursor: ready ? "pointer" : "default", fontFamily: "inherit",
@@ -1754,6 +1854,15 @@ function ManageView({ data, update, reseed, restore }) {
 /* ------------------------------------------------------------------ */
 /* Rest timer — lives in the tab bar, styled apart from the text tabs  */
 /* ------------------------------------------------------------------ */
+const SASS = [
+  "The machine misses you.",
+  "That's not rest, that's a nap.",
+  "The weights are getting cold.",
+  "Scrolling isn't a set.",
+  "Your muscles say they're ready.",
+  "Rest complete. Excuses loading?",
+];
+
 function RestTimer() {
   const [startTs, setStartTs] = useState(null);
   const [, tick] = useState(0);
@@ -1769,13 +1878,19 @@ function RestTimer() {
   const warn = secs >= 75 && secs < 90;
   const long = secs >= 90;
 
+  const sass = startTs && secs >= 180 ? SASS[Math.floor((secs - 180) / 15) % SASS.length] : null;
   return startTs ? (
-    <div className={`ll-restpill on ${long ? "long" : warn ? "warn" : ""}`}>
-      <button className="ll-restmain" onClick={() => setStartTs(Date.now())} aria-label="restart rest timer">
-        {m}:{s}
-      </button>
-      <button className="ll-reststop" aria-label="stop rest timer" onClick={() => setStartTs(null)}>✕</button>
-    </div>
+    <Row style={{ gap: 8 }}>
+      {sass && (
+        <span style={{ fontSize: 10.5, fontStyle: "italic", color: T.neg, maxWidth: 150, textAlign: "right", lineHeight: 1.25 }}>{sass}</span>
+      )}
+      <div className={`ll-restpill on ${long ? "long" : warn ? "warn" : ""}`}>
+        <button className="ll-restmain" onClick={() => setStartTs(Date.now())} aria-label="restart rest timer">
+          {m}:{s}
+        </button>
+        <button className="ll-reststop" aria-label="stop rest timer" onClick={() => setStartTs(null)}>✕</button>
+      </div>
+    </Row>
   ) : (
     <button className="ll-restpill" onClick={() => setStartTs(Date.now())} aria-label="start rest timer">⏱ REST</button>
   );
@@ -1855,6 +1970,8 @@ function App() {
   const [day, setDay] = useState(defaultDay());
   const [saveState, setSaveState] = useState("saved");
   const [loadError, setLoadError] = useState(false);
+  const [, discoTick] = useState(0);
+  const tapRef = useRef({ n: 0, t: 0 });
   const timer = useRef(null);
 
   useEffect(() => {
@@ -1917,6 +2034,27 @@ function App() {
     scheduleSave(seed);
   };
 
+  const onLogoTap = () => {
+    const now = Date.now();
+    if (now - tapRef.current.t > 1500) tapRef.current.n = 0;
+    tapRef.current.t = now;
+    tapRef.current.n += 1;
+    if (tapRef.current.n < 5) return;
+    tapRef.current.n = 0;
+    const ids = Object.keys(THEMES);
+    let i = 0;
+    const iv = setInterval(() => {
+      applyTheme(ids[i % ids.length]);
+      discoTick((x) => x + 1);
+      i += 1;
+      if (i > ids.length * 2) {
+        clearInterval(iv);
+        applyTheme((data && data.theme) || "iron");
+        discoTick((x) => x + 1);
+      }
+    }, 110);
+  };
+
   if (!data) {
     return (
       <div className="ll-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
@@ -1932,7 +2070,7 @@ function App() {
       <div className="ll-shell">
         <Row style={{ justifyContent: "space-between", padding: "18px 0 14px" }}>
           <Row style={{ gap: 10, alignItems: "baseline" }}>
-            <span className="ll-display" style={{ fontSize: 17, fontWeight: 700, letterSpacing: "0.18em" }}>FRANCO FIT</span>
+            <span className="ll-display" onClick={onLogoTap} style={{ fontSize: 17, fontWeight: 700, letterSpacing: "0.18em", cursor: "pointer", userSelect: "none" }}>FRANCO FIT</span>
             <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>
               {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
             </span>
