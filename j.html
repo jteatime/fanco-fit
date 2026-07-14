@@ -1555,6 +1555,9 @@ function ManageView({ data, update, reseed, restore }) {
 
   const [importText, setImportText] = useState("");
   const [importMsg, setImportMsg] = useState("");
+  const [syncInput, setSyncInput] = useState("");
+  const [syncMsg, setSyncMsg] = useState("");
+  const cloud = typeof CLOUD_SYNC !== "undefined" && CLOUD_SYNC.enabled ? CLOUD_SYNC : null;
 
   const downloadBackup = () => {
     try {
@@ -1834,6 +1837,36 @@ function ManageView({ data, update, reseed, restore }) {
             )}
           </div>
         )}
+        {cloud && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.line}` }}>
+            <div className="ll-display" style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Cloud sync</div>
+            <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 6 }}>
+              Your data backs up automatically. This code is its address — save it somewhere safe. On a new phone, enter it below to pull everything back.
+            </div>
+            <input className="ll-input" readOnly value={cloud.id()} onFocus={(e) => e.target.select()} />
+            <Row style={{ marginTop: 8 }}>
+              <input className="ll-input" placeholder="Enter a sync code…" value={syncInput}
+                onChange={(e) => setSyncInput(e.target.value)} />
+              <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={async () => {
+                const code = syncInput.trim();
+                if (!code) return;
+                setSyncMsg("Checking…");
+                const val = await cloud.fetchById(code);
+                if (val) {
+                  cloud.adopt(code);
+                  restore(val);
+                  setSyncMsg("Connected — data pulled from the cloud.");
+                  setSyncInput("");
+                } else {
+                  setSyncMsg("No data found for that code. Nothing was changed.");
+                }
+              }}>Connect</button>
+            </Row>
+            {syncMsg && (
+              <div style={{ fontSize: 12.5, marginTop: 6, color: syncMsg.startsWith("Connected") ? T.pos : syncMsg === "Checking…" ? T.muted : T.neg }}>{syncMsg}</div>
+            )}
+          </div>
+        )}
         <div style={{ marginTop: 10 }}>
           {confirmReset ? (
             <Row>
@@ -1950,9 +1983,69 @@ function NamePopup({ onSave, onSkip }) {
 /* ------------------------------------------------------------------ */
 /* App                                                                 */
 /* ------------------------------------------------------------------ */
+/* ================= CLOUD SYNC (Supabase) =================
+   1. Create a free project at supabase.com
+   2. Run the SQL from the setup instructions to create the `logs` table
+   3. Paste your Project URL and anon key below, push to GitHub
+   Until then the app runs on device storage only. */
+const SUPABASE_URL = "https://sssjwqzkhxjreritecmg.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzc2p3cXpraHhqcmVyaXRlY21nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDg1OTIsImV4cCI6MjA5OTYyNDU5Mn0.OK3tRo8b3z4cPMbFxNR_djkeicQH4TEvBWRrFKQgKeA";
+
+const CLOUD_SYNC = (() => {
+  const enabled = SUPABASE_URL.startsWith("https://");
+  const idKey = "franco-fit-j-v1:sync-id";
+  const ensureId = () => {
+    let id = null;
+    try { id = localStorage.getItem(idKey); } catch {}
+    if (!id) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
+      try { localStorage.setItem(idKey, id); } catch {}
+    }
+    return id;
+  };
+  const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" };
+  const fetchById = async (id) => {
+    if (!enabled) return null;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/logs?id=eq.${encodeURIComponent(id)}&select=value`, { headers });
+      const rows = await r.json();
+      return rows && rows[0] ? rows[0].value : null;
+    } catch { return null; }
+  };
+  const push = async (value) => {
+    if (!enabled) return;
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/logs`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ id: ensureId(), value, updated_at: new Date().toISOString() }),
+      });
+    } catch {}
+  };
+  const adopt = (id) => { try { localStorage.setItem(idKey, id); } catch {} };
+  return { enabled, id: ensureId, fetchById, push, adopt };
+})();
+
 const window_storage = {
-  async get(k) { const v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; },
-  async set(k, v) { localStorage.setItem(k, v); return { key: k, value: v }; },
+  async get(k) {
+    let v = null;
+    try { v = localStorage.getItem(k); } catch {}
+    if (v != null) return { key: k, value: v };
+    if (CLOUD_SYNC.enabled) {
+      const cloud = await CLOUD_SYNC.fetchById(CLOUD_SYNC.id());
+      if (cloud) {
+        const str = JSON.stringify(cloud);
+        try { localStorage.setItem(k, str); } catch {}
+        return { key: k, value: str };
+      }
+    }
+    return null;
+  },
+  async set(k, v) {
+    try { localStorage.setItem(k, v); } catch {}
+    try { CLOUD_SYNC.push(JSON.parse(v)); } catch {}
+    return { key: k, value: v };
+  },
 };
 
 function seedJ() {
