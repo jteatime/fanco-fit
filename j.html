@@ -300,6 +300,8 @@ const num = (v) => {
 };
 const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.w) * num(s.r)), 0);
 const repsOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.r)), 0);
+const isBodyweight = (sets) => volumeOf(sets) === 0 && repsOf(sets) > 0;
+const scoreOf = (sets) => { const v = volumeOf(sets); return v > 0 ? v : repsOf(sets); };
 const fmtVol = (n) => Math.round(n).toLocaleString("en-US");
 const setsLine = (sets) =>
   sets
@@ -341,7 +343,7 @@ function cellDateFor(cycleStart, w, day) {
   return cycleStart;
 }
 const dayVolume = (sess) =>
-  Object.values(sess.entries).reduce((a, e) => a + (entryHasData(e) ? volumeOf(e.sets) : 0), 0);
+  Object.values(sess.entries).reduce((a, e) => a + (entryHasData(e) ? scoreOf(e.sets) : 0), 0);
 function daySessionIn(data, day, w) {
   return sortedSessions(data).find(
     (s) => s.day === day && weekOfCycle(data, s.date) === w && Object.values(s.entries).some(entryHasData)
@@ -434,6 +436,10 @@ function buildSheetRows(data) {
       rows.push(r);
     }
   }
+
+  sessions.forEach((s) => {
+    if ((s.dayNote || "").trim()) extras.push([s.date, s.day, "— whole day —", "", "", s.dayNote]);
+  });
 
   if (extras.length) {
     rows.push([], ["Machines, swaps & notes"], ["Date", "Day", "Exercise", "Swap", "Machine", "Note"]);
@@ -665,9 +671,9 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
   const extraFilled = todaySets.filter((s) => s.extra && num(s.r) > 0).length;
   const exFilled = skippedAll ? exTotal : plannedFilled + extraFilled;
   const exComplete = skippedAll || plannedFilled >= exTotal;
-  const todayVol = volumeOf(todaySets);
-  const lastVol = lastSame ? volumeOf(lastSame.entry.sets) : 0;
-  const liveDelta = hasLogged && lastSame ? pct(lastVol, todayVol) : null;
+  const todayVol = scoreOf(todaySets);
+  const lastVol = lastSame ? scoreOf(lastSame.entry.sets) : 0;
+  const liveDelta = exComplete && !skippedAll && lastSame ? pct(lastVol, todayVol) : null;
   const beating = exComplete && liveDelta !== null && liveDelta > 0;
   const stripColor = !exComplete
     ? T.line
@@ -688,7 +694,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exComplete]);
 
-  const bodyweight = lastSame && volumeOf(lastSame.entry.sets) === 0 && repsOf(lastSame.entry.sets) > 0;
+  const bodyweight = lastSame && isBodyweight(lastSame.entry.sets);
 
   return (
     <div className="ll-card" style={{ position: "relative" }}>
@@ -732,6 +738,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                 ))}
               </Row>
             )}
+            {!data.hideDeltas && exComplete && liveDelta !== null && <Delta value={liveDelta} />}
             {lastSame && lastSame.entry.note && <span title="note last time" style={{ color: T.amber, fontSize: 14 }}>●</span>}
             <span style={{ color: T.faint, fontSize: 13 }}>{open ? "▾" : "▸"}</span>
           </Row>
@@ -870,12 +877,12 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                 </button>
               </Row>
 
-              {hasLogged && (
+              {exComplete && (
                 <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ color: T.muted, fontSize: 13 }}>
-                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> vol
+                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> {isBodyweight(todaySets) ? "reps" : "vol"}
                   </span>
-                  <Delta value={liveDelta} />
+                  {!data.hideDeltas && <Delta value={liveDelta} />}
                 </Row>
               )}
             </>
@@ -1038,6 +1045,9 @@ function TodayView({ data, update, day, setDay }) {
 
   const sess = data.sessions[sessionKey];
   const [celebration, setCelebration] = useState(null);
+  const [dayNoteOpen, setDayNoteOpen] = useState(false);
+  const [dayNoteDraft, setDayNoteDraft] = useState("");
+  useEffect(() => { setDayNoteOpen(false); }, [sessionKey]);
 
   useEffect(() => {
     if (!DAYS.includes(day)) setDay(defaultDay());
@@ -1056,13 +1066,46 @@ function TodayView({ data, update, day, setDay }) {
   });
   const complete = exList.length > 0 && totalSets > 0 && filledSets >= totalSets;
 
-  const started = !!(sess && (sess.startedAt || Object.values(sess.entries).some(entryHasData)));
+  const started = !!(sess && sess.startedAt);
 
   const startWorkout = () =>
     update((d) => {
       if (!d.sessions[sessionKey]) d.sessions[sessionKey] = { date: sessionKey.split("|")[0], day, entries: {} };
       d.sessions[sessionKey].startedAt = Date.now();
     });
+
+  const stopWorkout = () =>
+    update((d) => {
+      const s = d.sessions[sessionKey];
+      if (s) { delete s.startedAt; delete s.pausedAt; delete s.pausedAccum; }
+    });
+
+  const togglePause = () =>
+    update((d) => {
+      const s = d.sessions[sessionKey];
+      if (!s) return;
+      if (s.pausedAt) { s.pausedAccum = (s.pausedAccum || 0) + (Date.now() - s.pausedAt); delete s.pausedAt; }
+      else { s.pausedAt = Date.now(); }
+    });
+
+  const openDayNote = () => {
+    setDayNoteDraft((sess && sess.dayNote) || "");
+    setDayNoteOpen(true);
+  };
+
+  const saveDayNote = () => {
+    const val = dayNoteDraft.trim();
+    update((d) => {
+      if (!d.sessions[sessionKey]) d.sessions[sessionKey] = { date: sessionKey.split("|")[0], day, entries: {} };
+      const s = d.sessions[sessionKey];
+      if (val) s.dayNote = val; else delete s.dayNote;
+    });
+    setDayNoteOpen(false);
+  };
+
+  const lastDayNote = sortedSessions(data)
+    .filter((s) => s.day === day && s.date < dateFor && (s.dayNote || "").trim())
+    .slice(-1)[0] || null;
 
   const doneOuter = !!(sess && sess.celebrated);
   const [charging, setCharging] = useState(false);
@@ -1125,9 +1168,11 @@ function TodayView({ data, update, day, setDay }) {
 
     setCelebration({ msg, refeed: preRefeed, reward: rewardOf(data), record, finale });
     update((d) => {
-      if (d.sessions[sessionKey]) {
-        d.sessions[sessionKey].celebrated = true;
-        d.sessions[sessionKey].finishedAt = Date.now();
+      const s = d.sessions[sessionKey];
+      if (s) {
+        if (s.pausedAt) { s.pausedAccum = (s.pausedAccum || 0) + (Date.now() - s.pausedAt); delete s.pausedAt; }
+        s.celebrated = true;
+        s.finishedAt = Date.now();
       }
     });
   };
@@ -1135,7 +1180,17 @@ function TodayView({ data, update, day, setDay }) {
   return (
     <div>
       {celebration && <Celebration {...celebration} onClose={() => setCelebration(null)} />}
-      {weekOffset === 0 && started && !(sess && sess.celebrated) && <WorkoutBar startedAt={sess && sess.startedAt} />}
+      {weekOffset === 0 && started && !(sess && sess.celebrated) && (
+        <WorkoutBar
+          startedAt={sess && sess.startedAt}
+          pausedAt={sess && sess.pausedAt}
+          pausedAccum={sess && sess.pausedAccum}
+          hidden={!!data.hideClock}
+          onToggleHide={() => update((d) => { d.hideClock = !d.hideClock; })}
+          onStop={stopWorkout}
+          onTogglePause={togglePause}
+        />
+      )}
       <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
         <button className="ll-chip ll-day" disabled={wIdx <= 0} aria-label="previous week"
           style={{ opacity: wIdx <= 0 ? 0.35 : 1 }}
@@ -1165,6 +1220,34 @@ function TodayView({ data, update, day, setDay }) {
           </div>
         </div>
       </Row>
+      <div style={{ marginBottom: 10 }}>
+        {dayNoteOpen ? (
+          <>
+            <textarea className="ll-input" autoFocus rows={2} style={{ width: "100%" }}
+              placeholder="Note for the whole day (sleep, energy, soreness…)"
+              value={dayNoteDraft}
+              onChange={(e) => setDayNoteDraft(e.target.value)} />
+            <Row style={{ marginTop: 8 }}>
+              <button className="ll-btn ll-btn-chalk" style={{ flex: 1 }} onClick={saveDayNote}>Save note</button>
+              <button className="ll-btn" onClick={() => setDayNoteOpen(false)}>Cancel</button>
+            </Row>
+          </>
+        ) : ((sess && sess.dayNote) || "").trim() ? (
+          <div className="ll-note" style={{ cursor: "pointer" }} onClick={openDayNote}>
+            “{sess.dayNote}”
+            <span style={{ color: T.faint, fontSize: 11, marginLeft: 8 }}>tap to edit</span>
+          </div>
+        ) : (
+          <div onClick={openDayNote} style={{ color: T.faint, fontSize: 12.5, cursor: "pointer" }}>
+            + Note for the whole day
+          </div>
+        )}
+        {!dayNoteOpen && lastDayNote && (
+          <div style={{ color: T.faint, fontSize: 12, marginTop: 6 }}>
+            Last {day} ({fmtDate(lastDayNote.date)}): “{lastDayNote.dayNote}”
+          </div>
+        )}
+      </div>
       {weekOffset === 0 && !started && !(sess && sess.celebrated) && exList.length > 0 && (
         <button onClick={startWorkout}
           style={{
@@ -1183,7 +1266,7 @@ function TodayView({ data, update, day, setDay }) {
         const ready = complete && !done;
         const pctFill = totalSets > 0 ? Math.min(1, filledSets / totalSets) * 100 : 0;
         const durMin = sess && sess.startedAt && sess.finishedAt
-          ? Math.max(1, Math.round((sess.finishedAt - sess.startedAt) / 60000))
+          ? Math.max(1, Math.round((sess.finishedAt - sess.startedAt - (sess.pausedAccum || 0)) / 60000))
           : null;
         return (
           <button disabled={!ready} onClick={fireCelebration} className={charging && ready ? "ll-charge" : ""}
@@ -1366,13 +1449,14 @@ function ProgressView({ data, day, setDay, onGoToday }) {
           Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
           {prev ? ` · vs week ${weekOfCycle(data, prev.date) + 1}` : ""}
         </div>
+        {(sess.dayNote || "").trim() && <div className="ll-note" style={{ marginBottom: 14 }}>“{sess.dayNote}”</div>}
         {data.exercises.filter((ex) => sess.entries[ex.id]).map((ex) => {
           const e = sess.entries[ex.id];
           if (!entryHasData(e)) return null;
           const vName = (ex.variants.find((v) => v.id === e.variantId) || {}).name || "";
-          const evol = volumeOf(e.sets);
+          const evol = scoreOf(e.sets);
           const prevSame = lastEntryFor(data, ex.id, e.variantId, openDayKey, sess.date);
-          const exDelta = prevSame ? pct(volumeOf(prevSame.entry.sets), evol) : null;
+          const exDelta = prevSame ? pct(scoreOf(prevSame.entry.sets), evol) : null;
           const won = exDelta !== null && exDelta > 0;
           const exStrip = won ? T.pos : exDelta !== null && exDelta < 0 ? T.neg : T.amber;
           return (
@@ -1389,7 +1473,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
                     <Row style={{ gap: 8, flex: "none" }}>
                       <Delta value={exDelta} />
                       <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
-                        {evol > 0 ? fmtVol(evol) : `${repsOf(e.sets)} reps`}
+                        {isBodyweight(e.sets) ? `${repsOf(e.sets)} reps` : fmtVol(evol)}
                       </span>
                     </Row>
                   </Row>
@@ -1411,16 +1495,16 @@ function ProgressView({ data, day, setDay, onGoToday }) {
   if (openEx) {
     const ex = data.exercises.find((e) => e.id === openEx);
     const hist = historyFor(data, ex.id);
-    const maxVol = Math.max(1, ...hist.map((h) => volumeOf(h.entry.sets)));
+    const maxVol = Math.max(1, ...hist.map((h) => scoreOf(h.entry.sets)));
     const rows = hist.map((h, i) => {
-      const vol = volumeOf(h.entry.sets);
+      const vol = scoreOf(h.entry.sets);
       /* find previous session with the SAME machine for a fair delta */
       let prevSame = null;
       for (let j = i - 1; j >= 0; j--) {
         if (hist[j].entry.variantId === h.entry.variantId) { prevSame = hist[j]; break; }
       }
       const machineChanged = i > 0 && hist[i - 1].entry.variantId !== h.entry.variantId;
-      return { ...h, vol, delta: prevSame ? pct(volumeOf(prevSame.entry.sets), vol) : null, machineChanged };
+      return { ...h, vol, delta: prevSame ? pct(scoreOf(prevSame.entry.sets), vol) : null, machineChanged };
     }).reverse();
 
     return (
@@ -1453,7 +1537,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
               <PlateBar frac={r.vol / maxVol} color={T.amber} />
               <Row style={{ justifyContent: "space-between", marginTop: 7 }}>
                 <span className="ll-num" style={{ color: T.muted, fontSize: 13 }}>{setsLine(r.entry.sets)}</span>
-                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{r.vol > 0 ? fmtVol(r.vol) : `${repsOf(r.entry.sets)} reps`}</span>
+                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{isBodyweight(r.entry.sets) ? `${repsOf(r.entry.sets)} reps` : fmtVol(r.vol)}</span>
               </Row>
               {r.entry.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{r.entry.note}”</div> : null}
             </div>
@@ -1489,13 +1573,13 @@ function ProgressView({ data, day, setDay, onGoToday }) {
         if (last) {
           for (let j = hist.length - 2; j >= 0; j--) {
             if (hist[j].entry.variantId === last.entry.variantId) {
-              delta = pct(volumeOf(hist[j].entry.sets), volumeOf(last.entry.sets));
+              delta = pct(scoreOf(hist[j].entry.sets), scoreOf(last.entry.sets));
               break;
             }
           }
         }
         const mini = hist.slice(-6);
-        const maxV = Math.max(1, ...mini.map((h) => volumeOf(h.entry.sets)));
+        const maxV = Math.max(1, ...mini.map((h) => scoreOf(h.entry.sets)));
         return (
           <div key={ex.id} className="ll-card" style={{ padding: "12px 14px", cursor: "pointer" }} onClick={() => setOpenEx(ex.id)}>
             <Row style={{ justifyContent: "space-between" }}>
@@ -1507,7 +1591,7 @@ function ProgressView({ data, day, setDay, onGoToday }) {
                     return (
                       <div key={i} style={{
                         width: 14,
-                        height: Math.max(3, (volumeOf(h.entry.sets) / maxV) * 26),
+                        height: Math.max(3, (scoreOf(h.entry.sets) / maxV) * 26),
                         background: same ? T.amber : T.line,
                         borderRadius: 2,
                       }} />
@@ -1650,6 +1734,16 @@ function ManageView({ data, update, reseed, restore }) {
               style={(data.theme || "iron") === id ? { borderColor: T.blue, color: T.blue } : {}}
               onClick={() => { update((d) => { d.theme = id; }); applyTheme(id); }}>
               {th.label}
+            </button>
+          ))}
+        </Row>
+        <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 6 }}>Volume % on workout cards</div>
+        <Row style={{ gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
+          {[["Show", false], ["Hide", true]].map(([lab, val]) => (
+            <button key={lab} className={`ll-chip ll-day ${!!data.hideDeltas === val ? "on" : ""}`}
+              style={!!data.hideDeltas === val ? { borderColor: T.blue, color: T.blue } : {}}
+              onClick={() => update((d) => { d.hideDeltas = val; })}>
+              {lab}
             </button>
           ))}
         </Row>
@@ -1932,25 +2026,68 @@ function RestTimer() {
 /* ------------------------------------------------------------------ */
 /* Sticky workout bar — elapsed time + rest timer, pinned while active */
 /* ------------------------------------------------------------------ */
-function WorkoutBar({ startedAt }) {
+function WorkoutBar({ startedAt, pausedAt, pausedAccum, hidden, onToggleHide, onStop, onTogglePause }) {
   const [, tick] = useState(0);
+  const [endArm, setEndArm] = useState(false);
   useEffect(() => {
     const iv = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(iv);
   }, []);
+  useEffect(() => {
+    if (!endArm) return;
+    const t = setTimeout(() => setEndArm(false), 3000);
+    return () => clearTimeout(t);
+  }, [endArm]);
+
   let label = null;
   if (startedAt) {
-    const secs = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const secs = Math.max(0, Math.floor(((pausedAt || Date.now()) - startedAt - (pausedAccum || 0)) / 1000));
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), sc = String(secs % 60).padStart(2, "0");
     label = h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sc}` : `${m}:${sc}`;
   }
+
+  const btnBase = { padding: 0, height: 27, minWidth: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700 };
+
+  const handleStop = () => {
+    if (endArm) { setEndArm(false); onStop(); }
+    else setEndArm(true);
+  };
+
   return (
     <div className="ll-workbar">
       <Row style={{ gap: 8 }}>
-        <span style={{ fontSize: 11, letterSpacing: "0.1em", color: T.faint, textTransform: "uppercase" }}>Workout</span>
-        {label && <span className="ll-num" style={{ fontSize: 16, fontWeight: 700 }}>{label}</span>}
+        {(!hidden && label) ? (
+          <span className="ll-num" style={{ fontSize: 16, fontWeight: 700, color: pausedAt ? T.faint : T.ink }}>{label}</span>
+        ) : (
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: T.faint, textTransform: "uppercase" }}>
+            Workout{pausedAt ? " · paused" : ""}
+          </span>
+        )}
+        {!hidden && (
+          <>
+            <button aria-label={pausedAt ? "resume workout" : "pause workout"} onClick={onTogglePause}
+              style={{ ...btnBase, background: T.surface2, border: `1px solid ${pausedAt ? T.blue : T.line}`, color: T.blue }}>
+              {pausedAt ? "▶" : (
+                <Row style={{ gap: 5 }}>
+                  <span style={{ width: 3, height: 14, background: T.blue, borderRadius: 1, display: "block" }} />
+                  <span style={{ width: 3, height: 14, background: T.blue, borderRadius: 1, display: "block" }} />
+                </Row>
+              )}
+            </button>
+            <button aria-label="stop workout" onClick={handleStop}
+              style={{ ...btnBase, color: T.neg, border: `1px solid ${endArm ? T.neg : T.line}`, background: endArm ? "rgba(217,106,91,0.14)" : T.surface2 }}>
+              {endArm ? "Stop?" : <span style={{ width: 14, height: 14, background: T.neg, borderRadius: 3, display: "block" }} />}
+            </button>
+          </>
+        )}
       </Row>
-      <RestTimer />
+      <Row style={{ gap: 8 }}>
+        <button aria-label={hidden ? "show workout clock" : "hide workout clock"} onClick={onToggleHide}
+          style={{ background: "none", border: "none", color: T.faint, fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+          {hidden ? "show" : "hide"}
+        </button>
+        <RestTimer />
+      </Row>
     </div>
   );
 }
