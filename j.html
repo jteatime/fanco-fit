@@ -130,7 +130,7 @@ html, body { scrollbar-width: none; -ms-overflow-style: none; }
 .ll-chip.starred.on { border-color: rgba(246,200,81,0.9); box-shadow: 0 0 11px rgba(246,200,81,0.5); color: ${T.ink}; }
 .ll-chip.optional { border-style: dashed; color: ${T.faint}; }
 .ll-chip.optional.on { color: ${T.ink}; border-color: ${T.muted}; }
-.ll-chip.ll-day { padding: 5px 9px; gap: 4px; font-size: 12.5px; flex: none; }
+.ll-chip.ll-day { padding: 5px 9px; gap: 4px; font-size: 12.5px; flex: none; line-height: 1.25; white-space: nowrap; }
 .ll-tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: ${T.surface}; border-top: 1px solid ${T.line}; display: flex; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
 .ll-tab { flex: 1; padding: 13px 0 11px; text-align: center; color: ${T.faint}; font-weight: 600; font-size: 13px; cursor: pointer; border: none; background: none; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; }
 .ll-tab.on { color: ${T.ink}; }
@@ -1584,12 +1584,12 @@ function TrendCard({ data, update, day }) {
       </div>
       {collapsed ? null : (
         <>
-          <Row style={{ gap: 5, flexWrap: "wrap", marginBottom: metric === "weight" ? 10 : 6 }}>
+          <Row style={{ gap: 6, rowGap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: metric === "weight" ? 12 : 8 }}>
             {[["volume", "Volume"], ["duration", "Time"], ["weight", "Bodyweight"]].map(([m, lbl]) =>
               chip(metric === m, lbl, () => setMetric(m)))}
           </Row>
           {metric !== "weight" && (
-            <Row style={{ gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+            <Row style={{ gap: 6, rowGap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
               {[["all", "Weekly"], ["daily", "Daily"], ["day", day.slice(0, 3)]].map(([id, lbl]) => (
                 <button key={id} className={`ll-chip ll-day ${scope === id ? "on" : ""}`}
                   style={{ fontSize: 11.5, padding: "4px 9px", ...(scope === id ? { borderColor: T.muted, color: T.ink } : {}) }}
