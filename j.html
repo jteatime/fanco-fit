@@ -310,6 +310,17 @@ const to24 = (ts) => {
   const p = (n) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 };
+const toDateStr = (ts) => {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+const dtToTs = (dateStr, hhmm) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || "")) return null;
+  const base = new Date(dateStr + "T12:00:00");
+  if (isNaN(base.getTime())) return null;
+  return clockToTs(base.getTime(), hhmm);
+};
 const num = (v) => {
   const n = parseFloat(v);
   return isNaN(n) ? 0 : n;
@@ -1466,16 +1477,15 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
     const durMin = hasStamps
       ? Math.max(0, Math.round((sess.finishedAt - sess.startedAt - (sess.pausedAccum || 0)) / 60000))
       : null;
-    const pickWhich = (which) =>
-      setTimeEdit({ which, val: to24(which === "start"
+    const pickWhich = (which) => {
+      const ts = which === "start"
         ? (sess.startedAt || Date.now())
-        : (sess.finishedAt || sess.startedAt || Date.now())) });
+        : (sess.finishedAt || sess.startedAt || Date.now());
+      setTimeEdit({ which, date: toDateStr(ts), time: to24(ts) });
+    };
     const saveTime = () => {
       if (!timeEdit) return;
-      const base = timeEdit.which === "start"
-        ? (sess.startedAt || new Date(sess.date + "T12:00:00").getTime())
-        : (sess.finishedAt || sess.startedAt || new Date(sess.date + "T12:00:00").getTime());
-      const ts = clockToTs(base, timeEdit.val);
+      const ts = dtToTs(timeEdit.date, timeEdit.time);
       if (ts == null) { setTimeEdit(null); return; }
       update((dd) => {
         const s = dd.sessions[openDayKey];
@@ -1517,18 +1527,20 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
                   return (
                     <button key={which} className="ll-chip" onClick={() => pickWhich(which)}
                       style={{ background: on ? T.blue : T.surface2, color: on ? "#fff" : T.ink, border: `1px solid ${on ? T.blue : T.line}` }}>
-                      {lbl} {fmtClock(ts) || "—"}
+                      {lbl} {ts ? `${fmtDate(toDateStr(ts))} ${fmtClock(ts)}` : "—"}
                     </button>
                   );
                 })}
               </Row>
-              <Row style={{ gap: 8 }}>
-                <input type="time" value={timeEdit.val} onChange={(e) => setTimeEdit({ ...timeEdit, val: e.target.value })}
+              <Row style={{ gap: 8, flexWrap: "wrap" }}>
+                <input type="date" value={timeEdit.date} onChange={(e) => setTimeEdit({ ...timeEdit, date: e.target.value })}
+                  className="ll-input" style={{ width: 150, padding: "6px 8px" }} />
+                <input type="time" value={timeEdit.time} onChange={(e) => setTimeEdit({ ...timeEdit, time: e.target.value })}
                   className="ll-input" style={{ width: 130, padding: "6px 8px" }} />
                 <button className="ll-btn ll-btn-chalk ll-btn-sm" onClick={saveTime}>Save</button>
                 <button className="ll-btn ll-btn-sm" onClick={() => setTimeEdit(null)}>Cancel</button>
               </Row>
-              <div style={{ color: T.faint, fontSize: 11.5, marginTop: 8 }}>Duration recalculates automatically from these times.</div>
+              <div style={{ color: T.faint, fontSize: 11.5, marginTop: 8 }}>Duration recalculates automatically from these dates and times.</div>
             </div>
           )}
         </div>
