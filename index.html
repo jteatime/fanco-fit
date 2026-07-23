@@ -1677,16 +1677,19 @@ function TrendCard({ data, update, day }) {
       </div>
       {collapsed ? null : (
         <>
-          <Row style={{ gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <Row style={{ gap: 5, flexWrap: "wrap", marginBottom: metric === "weight" ? 10 : 6 }}>
             {[["volume", "Volume"], ["duration", "Time"], ["weight", "Bodyweight"]].map(([m, lbl]) =>
               chip(metric === m, lbl, () => setMetric(m)))}
-            {metric !== "weight" && (
-              <Row style={{ gap: 6, marginLeft: "auto" }}>
-                {[["all", "Weekly"], ["daily", "Daily"], ["day", day.slice(0, 3)]].map(([sc, lbl]) =>
-                  chip(scope === sc, lbl, () => setScope(sc)))}
-              </Row>
-            )}
           </Row>
+          {metric !== "weight" && (
+            <Row style={{ gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+              {[["all", "Weekly"], ["daily", "Daily"], ["day", day.slice(0, 3)]].map(([id, lbl]) => (
+                <button key={id} className={`ll-chip ll-day ${scope === id ? "on" : ""}`}
+                  style={{ fontSize: 11.5, padding: "4px 9px", ...(scope === id ? { borderColor: T.muted, color: T.ink } : {}) }}
+                  onClick={() => setScope(id)}>{lbl}</button>
+              ))}
+            </Row>
+          )}
           <LineChart points={chart.points} color={chart.color} fmt={chart.fmt} showValues={metric === "weight"} />
           {metric === "weight" && (
             <div style={{ marginTop: 12 }}>
