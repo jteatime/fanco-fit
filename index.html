@@ -1595,6 +1595,7 @@ function TrendCard({ data, update, day }) {
   const [scope, setScope] = useState("all");
   const [wInput, setWInput] = useState("");
   const [wDate, setWDate] = useState(todayISO());
+  const [delArm, setDelArm] = useState(null);
   const bwUnit = data.bwUnit || "lb";
   const collapsed = !!data.chartsCollapsed;
 
@@ -1645,6 +1646,11 @@ function TrendCard({ data, update, day }) {
     const iso = /^\d{4}-\d{2}-\d{2}$/.test(wDate) ? wDate : todayISO();
     update((d) => { if (!d.weights) d.weights = {}; d.weights[iso] = rounded; });
     setWInput("");
+  };
+
+  const deleteWeight = (iso) => {
+    update((d) => { if (d.weights) delete d.weights[iso]; });
+    setDelArm(null);
   };
 
   let durText = null;
@@ -1703,6 +1709,31 @@ function TrendCard({ data, update, day }) {
                 <button className="ll-btn ll-btn-chalk" onClick={saveWeight}>Log</button>
               </Row>
               <div style={{ color: T.faint, fontSize: 11.5, marginTop: 8 }}>Backdate freely — pick any date to import readings from another app. Same date overwrites.</div>
+              {weightEntries(data).length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", color: T.faint, marginBottom: 2 }}>Logged readings · tap to remove</div>
+                  <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                    {weightEntries(data).slice().reverse().map((e) => {
+                      const armed = delArm === e.iso;
+                      return (
+                        <Row key={e.iso} style={{ justifyContent: "space-between", alignItems: "center", padding: "7px 2px", borderTop: `1px solid ${T.line}` }}>
+                          <button onClick={() => setDelArm(armed ? null : e.iso)}
+                            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", color: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 10, flex: 1, textAlign: "left" }}>
+                            <span style={{ fontSize: 13, color: T.muted }}>{fmtDate(e.iso)}</span>
+                            <span className="ll-num" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{e.v} {bwUnit}</span>
+                          </button>
+                          {armed && (
+                            <Row style={{ gap: 6 }}>
+                              <button className="ll-btn ll-btn-sm" style={{ color: T.neg, borderColor: T.neg }} onClick={() => deleteWeight(e.iso)}>Delete</button>
+                              <button className="ll-btn ll-btn-sm" aria-label="cancel" onClick={() => setDelArm(null)}>✕</button>
+                            </Row>
+                          )}
+                        </Row>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {durText && <div style={{ color: T.faint, fontSize: 11, marginTop: 10 }}>{durText}</div>}
