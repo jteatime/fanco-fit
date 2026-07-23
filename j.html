@@ -252,6 +252,8 @@ function buildSeed() {
     rewardId: "gold-star",
     weights: {},
     bwUnit: "lb",
+    sentNotes: [],
+    noteAcks: {},
     cycleNumber: 2,
     cycleName: "Cycle 2",
     cycleWeeks: 8,
@@ -989,7 +991,7 @@ const CELEBRATIONS = [
   "Gravity filed a complaint.",
 ];
 
-function Celebration({ msg, refeed, reward, record, finale, onClose }) {
+function Celebration({ msg, from, refeed, reward, record, finale, onClose }) {
   const pieces = useMemo(
     () =>
       Array.from({ length: finale ? 240 : 140 }, (_, i) => {
@@ -1032,6 +1034,9 @@ function Celebration({ msg, refeed, reward, record, finale, onClose }) {
         return <span style={st}>{(reward && reward.char) || "★"}</span>;
       })()}
       <div className="ll-display" style={{ fontSize: 38, fontWeight: 700, marginTop: 12, lineHeight: 1.1 }}>{msg}</div>
+      {from && (
+        <div style={{ fontSize: 13, color: T.faint, marginTop: 8, letterSpacing: "0.08em" }}>💌 from {from}</div>
+      )}
       {record && !finale && (
         <div className="ll-display" style={{ fontSize: 19, fontWeight: 700, letterSpacing: "0.14em", marginTop: 10, color: (reward && reward.color) || "#F6C851" }}>
           NEW WEEKLY RECORD
@@ -1060,7 +1065,7 @@ function Celebration({ msg, refeed, reward, record, finale, onClose }) {
 /* ------------------------------------------------------------------ */
 /* Today view                                                          */
 /* ------------------------------------------------------------------ */
-function TodayView({ data, update, day, setDay }) {
+function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote }) {
   const rw = rewardOf(data);
   const [weekOffset, setWeekOffset] = useState(0);
   const curWeek = Math.max(0, weekOfCycle(data, todayISO()));
@@ -1154,9 +1159,17 @@ function TodayView({ data, update, day, setDay }) {
     prevReadyRef.current = readyNow;
   }, [complete, doneOuter]);
 
-  const fireCelebration = () => {
+  const fireCelebration = (notesList) => {
     const who = (data.userName || "champ").trim();
-    const msg = CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)].replace(/\{name\}/g, who);
+    const sDate = sess ? sess.date : todayISO();
+    const acks = data.noteAcks || {};
+    const due = (notesList || notes || [])
+      .filter((n) => n && n.text && n.date <= sDate && !acks[n.id])
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0)));
+    const note = due[0] || null;
+    const msg = note
+      ? note.text.replace(/\{name\}/g, who)
+      : CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)].replace(/\{name\}/g, who);
     const preRefeed = data.refeedDay
       ? day === WEEK[(WEEK.indexOf(data.refeedDay) + 6) % 7]
       : day === "Friday";
@@ -1201,7 +1214,8 @@ function TodayView({ data, update, day, setDay }) {
       finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)) };
     }
 
-    setCelebration({ msg, refeed: preRefeed, reward: rewardOf(data), record, finale });
+    setCelebration({ msg, from: note ? PARTNER_NAME : null, refeed: preRefeed, reward: rewardOf(data), record, finale });
+    if (note && deliverNote) deliverNote(note.id);
     update((d) => {
       const s = d.sessions[sessionKey];
       if (s) {
@@ -1305,7 +1319,7 @@ function TodayView({ data, update, day, setDay }) {
           ? Math.max(1, Math.round((sess.finishedAt - sess.startedAt - (sess.pausedAccum || 0)) / 60000))
           : null;
         return (
-          <button disabled={!ready} onClick={fireCelebration} className={charging && ready ? "ll-charge" : ""}
+          <button disabled={!ready} onClick={async () => { const fresh = refreshInbox ? await refreshInbox() : null; fireCelebration(fresh); }} className={charging && ready ? "ll-charge" : ""}
             style={{
               width: "100%", padding: 14, marginTop: 4, fontSize: 15, fontWeight: 700,
               borderRadius: 12, cursor: ready ? "pointer" : "default", fontFamily: "inherit",
@@ -2019,6 +2033,22 @@ function ManageView({ data, update, reseed, restore }) {
   const [confirmReset, setConfirmReset] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
   const [sheetText, setSheetText] = useState(null);
+  const [notePub, setNotePub] = useState(null);
+  const [noteDate, setNoteDate] = useState("");
+  const [noteText, setNoteText] = useState("");
+  useEffect(() => { if (CLOUD_SYNC.enabled) CLOUD_SYNC.fetchById(PARTNER_PUB).then(setNotePub); }, []);
+  const partnerName = PARTNER_NAME;
+  const workoutDates = notePub && notePub.schedule ? upcomingWorkoutDates(notePub.schedule, 8) : [];
+  const sentNotes = data.sentNotes || [];
+  const pushInbox = (d) => { if (CLOUD_SYNC.enabled) CLOUD_SYNC.pushTo(PARTNER_INBOX, { notes: d.sentNotes || [] }); };
+  const sendNote = () => {
+    const text = noteText.trim();
+    if (!text) return;
+    const date = noteDate || workoutDates[0] || todayISO();
+    update((d) => { if (!d.sentNotes) d.sentNotes = []; d.sentNotes.push({ id: `${Date.now()}`, date, text, createdAt: Date.now() }); pushInbox(d); });
+    setNoteText(""); setNoteDate("");
+  };
+  const removeNote = (id) => update((d) => { d.sentNotes = (d.sentNotes || []).filter((n) => n.id !== id); pushInbox(d); });
 
   const exportSheet = () => {
     const rows = buildSheetRows(data);
@@ -2188,6 +2218,69 @@ function ManageView({ data, update, reseed, restore }) {
             </Row>
           </Row>
         ))}
+      </div>
+
+      {/* Note to partner */}
+      <div className="ll-card" style={{ padding: 14 }}>
+        <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>Note to {partnerName}</div>
+        <div style={{ color: T.muted, fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>
+          They'll see it as their end-of-workout message. Undelivered notes roll to their next session.
+        </div>
+        {!CLOUD_SYNC.enabled ? (
+          <div className="ll-note">Cloud sync is off, so notes can't be delivered.</div>
+        ) : (
+          <>
+            {workoutDates.length > 0 ? (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", color: T.faint, marginBottom: 5 }}>{partnerName}'s workout days</div>
+                <Row style={{ gap: 6, rowGap: 6, flexWrap: "wrap" }}>
+                  {workoutDates.map((iso) => {
+                    const on = (noteDate || workoutDates[0]) === iso;
+                    return (
+                      <button key={iso} className={`ll-chip ll-day ${on ? "on" : ""}`}
+                        style={{ fontSize: 11.5, padding: "4px 9px", ...(on ? { borderColor: T.blue, color: T.blue } : {}) }}
+                        onClick={() => setNoteDate(iso)}>
+                        {new Date(iso + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                      </button>
+                    );
+                  })}
+                </Row>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 10 }}>
+                <input type="date" className="ll-input" value={noteDate} min={todayISO()} onChange={(e) => setNoteDate(e.target.value)} style={{ padding: "6px 8px" }} />
+                <div style={{ color: T.faint, fontSize: 11.5, marginTop: 4 }}>Waiting on {partnerName}'s schedule — have them open their app once to sync it.</div>
+              </div>
+            )}
+            <textarea className="ll-input" value={noteText} placeholder={`Message for ${partnerName}…`}
+              onChange={(e) => setNoteText(e.target.value)}
+              style={{ width: "100%", minHeight: 60, resize: "vertical", padding: 8 }} />
+            <Row style={{ marginTop: 8 }}>
+              <button className="ll-btn ll-btn-chalk" style={{ opacity: noteText.trim() ? 1 : 0.5 }} disabled={!noteText.trim()} onClick={sendNote}>Send</button>
+            </Row>
+            {sentNotes.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", color: T.faint, marginBottom: 4 }}>Queued &amp; sent</div>
+                {sentNotes.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map((n) => {
+                  const seen = notePub && notePub.acks && notePub.acks[n.id];
+                  return (
+                    <Row key={n.id} style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8, padding: "7px 2px", borderTop: `1px solid ${T.line}` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: T.muted }}>
+                          {fmtDate(n.date)} · {seen
+                            ? <span style={{ color: T.pos }}>seen {fmtDate(String(seen).slice(0, 10))}</span>
+                            : <span style={{ color: T.faint }}>delivers when they train</span>}
+                        </div>
+                        <div style={{ fontSize: 13.5, color: T.ink, marginTop: 1 }}>{n.text}</div>
+                      </div>
+                      {!seen && <button className="ll-btn ll-btn-sm" aria-label="delete note" onClick={() => removeNote(n.id)}>✕</button>}
+                    </Row>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Cycle */}
@@ -2554,6 +2647,18 @@ function NamePopup({ onSave, onSkip }) {
 const SUPABASE_URL = "https://sssjwqzkhxjreritecmg.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzc2p3cXpraHhqcmVyaXRlY21nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDg1OTIsImV4cCI6MjA5OTYyNDU5Mn0.OK3tRo8b3z4cPMbFxNR_djkeicQH4TEvBWRrFKQgKeA";
 
+/* Connected notes — the two-user love-note mailbox. Four fixed Supabase row
+   ids, identical strings in both files, with MY_* / PARTNER_* swapped per
+   version (see CLAUDE.md differences table). inbox-<user> is written only by
+   the partner; pub-<user> is written only by that user (read receipts + a
+   published copy of their workout schedule). Single-writer rows => no
+   conflicts. The row ids are the only secret; keep them out of logs. */
+const MY_INBOX      = "ff-nb-j-3e7d0a5c9b1f4826";
+const PARTNER_INBOX = "ff-nb-a-9c2f1e7b4a8d6053";
+const MY_PUB        = "ff-pb-j-1a5f9d3c7e0b8642";
+const PARTNER_PUB   = "ff-pb-a-6b4c8e2f0d9a7135";
+const PARTNER_NAME  = "Alicia";
+
 const CLOUD_SYNC = (() => {
   const enabled = SUPABASE_URL.startsWith("https://");
   const idKey = "franco-fit-j-v1:sync-id";
@@ -2575,18 +2680,19 @@ const CLOUD_SYNC = (() => {
       return rows && rows[0] ? rows[0].value : null;
     } catch { return null; }
   };
-  const push = async (value) => {
+  const pushTo = async (id, value) => {
     if (!enabled) return;
     try {
       await fetch(`${SUPABASE_URL}/rest/v1/logs`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify({ id: ensureId(), value, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ id, value, updated_at: new Date().toISOString() }),
       });
     } catch {}
   };
+  const push = (value) => pushTo(ensureId(), value);
   const adopt = (id) => { try { localStorage.setItem(idKey, id); } catch {} };
-  return { enabled, id: ensureId, fetchById, push, adopt };
+  return { enabled, id: ensureId, fetchById, push, pushTo, adopt };
 })();
 
 const window_storage = {
@@ -2620,8 +2726,34 @@ function seedJ() {
 
 const STORAGE_KEY = "franco-fit-j-v1";
 
+/* Snapshot of my current schedule, published so my partner's note composer
+   can highlight the days I actually train. */
+function mySchedulePayload(data) {
+  return {
+    days: DAYS.slice(),
+    optionalDays: { ...OPTIONAL_DAYS },
+    cycleStart: data.cycleStart,
+    cycleWeeks: data.cycleWeeks,
+  };
+}
+
+/* The next `count` calendar dates (from today) that fall on a scheduled
+   training day, given a published schedule payload. */
+function upcomingWorkoutDates(schedule, count) {
+  if (!schedule || !Array.isArray(schedule.days) || !schedule.days.length) return [];
+  const set = new Set(schedule.days.map((d) => DAY_NUM[d]));
+  const out = [];
+  let iso = todayISO();
+  for (let i = 0; i < 120 && out.length < count; i++) {
+    if (set.has(new Date(iso + "T12:00:00").getDay())) out.push(iso);
+    iso = addDays(iso, 1);
+  }
+  return out;
+}
+
 function App() {
   const [data, setData] = useState(null);
+  const [inbox, setInbox] = useState([]);
   const [tab, setTab] = useState("today");
   const [day, setDay] = useState(defaultDay());
   const [saveState, setSaveState] = useState("saved");
@@ -2645,8 +2777,11 @@ function App() {
           if (!parsed.rewardId) parsed.rewardId = "gold-star";
           if (!parsed.weights) parsed.weights = {};
           if (!parsed.bwUnit) parsed.bwUnit = "lb";
+          if (!parsed.sentNotes) parsed.sentNotes = [];
+          if (!parsed.noteAcks) parsed.noteAcks = {};
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
+          bootNotes(parsed);
           setData(parsed);
           return;
         }
@@ -2655,12 +2790,37 @@ function App() {
         const seed = seedJ();
         applySchedule(seed.refeedDay);
         applyTheme(seed.theme);
+        bootNotes(seed);
         setData(seed);
         try { await window_storage.set(STORAGE_KEY, JSON.stringify(seed)); }
         catch { setLoadError(true); }
       }
     })();
   }, []);
+
+  /* Publish my schedule + read-receipts, and pull any notes waiting for me. */
+  const bootNotes = (d) => {
+    if (!CLOUD_SYNC.enabled) return;
+    CLOUD_SYNC.pushTo(MY_PUB, { schedule: mySchedulePayload(d), acks: d.noteAcks || {}, name: d.userName || "" });
+    CLOUD_SYNC.fetchById(MY_INBOX).then((box) => { if (box && Array.isArray(box.notes)) setInbox(box.notes); });
+  };
+
+  const refreshInbox = async () => {
+    if (!CLOUD_SYNC.enabled) return inbox;
+    const box = await CLOUD_SYNC.fetchById(MY_INBOX);
+    if (box && Array.isArray(box.notes)) { setInbox(box.notes); return box.notes; }
+    return inbox;
+  };
+
+  /* Recipient marks a note delivered (= seen): store locally and republish my
+     pub row so the sender gets a read receipt. */
+  const deliverNote = (noteId) => {
+    update((d) => {
+      if (!d.noteAcks) d.noteAcks = {};
+      d.noteAcks[noteId] = new Date().toISOString();
+      if (CLOUD_SYNC.enabled) CLOUD_SYNC.pushTo(MY_PUB, { schedule: mySchedulePayload(d), acks: d.noteAcks, name: d.userName || "" });
+    });
+  };
 
   const scheduleSave = (next) => {
     setSaveState("saving");
@@ -2738,7 +2898,7 @@ function App() {
           </span>
         </Row>
         {loadError && <div className="ll-note" style={{ marginBottom: 10 }}>This browser is blocking storage — logs won't persist. Avoid private/incognito mode.</div>}
-        {tab === "today" && <TodayView data={data} update={update} day={day} setDay={setDay} />}
+        {tab === "today" && <TodayView data={data} update={update} day={day} setDay={setDay} notes={inbox} refreshInbox={refreshInbox} deliverNote={deliverNote} />}
         {tab === "progress" && (
           <ProgressView data={data} update={update} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
