@@ -294,6 +294,22 @@ const todayISO = () => {
 };
 const fmtDate = (iso) =>
   new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const fmtClock = (ts) =>
+  ts ? new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
+const clockToTs = (baseTs, hhmm) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return null;
+  const h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  const d = new Date(baseTs);
+  d.setHours(h, min, 0, 0);
+  return d.getTime();
+};
+const to24 = (ts) => {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 const num = (v) => {
   const n = parseFloat(v);
   return isNaN(n) ? 0 : n;
@@ -1088,6 +1104,12 @@ function TodayView({ data, update, day, setDay }) {
       else { s.pausedAt = Date.now(); }
     });
 
+  const setStartTime = (ts) =>
+    update((d) => {
+      const s = d.sessions[sessionKey];
+      if (s && s.startedAt) s.startedAt = ts;
+    });
+
   const openDayNote = () => {
     setDayNoteDraft((sess && sess.dayNote) || "");
     setDayNoteOpen(true);
@@ -1189,6 +1211,7 @@ function TodayView({ data, update, day, setDay }) {
           onToggleHide={() => update((d) => { d.hideClock = !d.hideClock; })}
           onStop={stopWorkout}
           onTogglePause={togglePause}
+          onSetStart={setStartTime}
         />
       )}
       <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
@@ -1424,10 +1447,11 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
   );
 }
 
-function ProgressView({ data, day, setDay, onGoToday }) {
+function ProgressView({ data, update, day, setDay, onGoToday }) {
   const rw = rewardOf(data);
   const [openEx, setOpenEx] = useState(null);
   const [openDayKey, setOpenDayKey] = useState(null);
+  const [timeEdit, setTimeEdit] = useState(null);
 
   /* Day log drill-in from the cycle grid */
   if (openDayKey && data.sessions[openDayKey]) {
@@ -1438,6 +1462,31 @@ function ProgressView({ data, day, setDay, onGoToday }) {
     for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
     const vol = dayVolume(sess);
     const delta = prev ? pct(dayVolume(prev), vol) : null;
+    const hasStamps = sess.startedAt && sess.finishedAt;
+    const durMin = hasStamps
+      ? Math.max(0, Math.round((sess.finishedAt - sess.startedAt - (sess.pausedAccum || 0)) / 60000))
+      : null;
+    const pickWhich = (which) =>
+      setTimeEdit({ which, val: to24(which === "start"
+        ? (sess.startedAt || Date.now())
+        : (sess.finishedAt || sess.startedAt || Date.now())) });
+    const saveTime = () => {
+      if (!timeEdit) return;
+      const base = timeEdit.which === "start"
+        ? (sess.startedAt || new Date(sess.date + "T12:00:00").getTime())
+        : (sess.finishedAt || sess.startedAt || new Date(sess.date + "T12:00:00").getTime());
+      const ts = clockToTs(base, timeEdit.val);
+      if (ts == null) { setTimeEdit(null); return; }
+      update((dd) => {
+        const s = dd.sessions[openDayKey];
+        if (!s) return;
+        if (timeEdit.which === "start") s.startedAt = ts; else s.finishedAt = ts;
+        if (s.startedAt && s.finishedAt && s.finishedAt < s.startedAt) {
+          const t = s.startedAt; s.startedAt = s.finishedAt; s.finishedAt = t;
+        }
+      });
+      setTimeEdit(null);
+    };
     return (
       <div className="ll-fade">
         <button className="ll-btn ll-btn-sm" style={{ marginBottom: 12 }} onClick={() => setOpenDayKey(null)}>← Back</button>
@@ -1450,6 +1499,39 @@ function ProgressView({ data, day, setDay, onGoToday }) {
           {prev ? ` · vs week ${weekOfCycle(data, prev.date) + 1}` : ""}
         </div>
         {(sess.dayNote || "").trim() && <div className="ll-note" style={{ marginBottom: 14 }}>“{sess.dayNote}”</div>}
+        <div className="ll-card" style={{ padding: "12px 14px", marginBottom: 14 }}>
+          <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: T.faint }}>Duration</div>
+              {durMin != null
+                ? <span className="ll-num" style={{ fontSize: 18, fontWeight: 700 }}>{durMin} min</span>
+                : <span style={{ color: T.muted, fontSize: 13.5 }}>No workout time recorded</span>}
+            </div>
+            {!timeEdit && <button className="ll-btn ll-btn-sm" onClick={() => pickWhich("start")}>Edit time</button>}
+          </Row>
+          {timeEdit && (
+            <div style={{ marginTop: 12 }}>
+              <Row style={{ gap: 8, marginBottom: 10 }}>
+                {[["start", "Started", sess.startedAt], ["finish", "Finished", sess.finishedAt]].map(([which, lbl, ts]) => {
+                  const on = timeEdit.which === which;
+                  return (
+                    <button key={which} className="ll-chip" onClick={() => pickWhich(which)}
+                      style={{ background: on ? T.blue : T.surface2, color: on ? "#fff" : T.ink, border: `1px solid ${on ? T.blue : T.line}` }}>
+                      {lbl} {fmtClock(ts) || "—"}
+                    </button>
+                  );
+                })}
+              </Row>
+              <Row style={{ gap: 8 }}>
+                <input type="time" value={timeEdit.val} onChange={(e) => setTimeEdit({ ...timeEdit, val: e.target.value })}
+                  className="ll-input" style={{ width: 130, padding: "6px 8px" }} />
+                <button className="ll-btn ll-btn-chalk ll-btn-sm" onClick={saveTime}>Save</button>
+                <button className="ll-btn ll-btn-sm" onClick={() => setTimeEdit(null)}>Cancel</button>
+              </Row>
+              <div style={{ color: T.faint, fontSize: 11.5, marginTop: 8 }}>Duration recalculates automatically from these times.</div>
+            </div>
+          )}
+        </div>
         {data.exercises.filter((ex) => sess.entries[ex.id]).map((ex) => {
           const e = sess.entries[ex.id];
           if (!entryHasData(e)) return null;
@@ -2026,9 +2108,11 @@ function RestTimer() {
 /* ------------------------------------------------------------------ */
 /* Sticky workout bar — elapsed time + rest timer, pinned while active */
 /* ------------------------------------------------------------------ */
-function WorkoutBar({ startedAt, pausedAt, pausedAccum, hidden, onToggleHide, onStop, onTogglePause }) {
+function WorkoutBar({ startedAt, pausedAt, pausedAccum, hidden, onToggleHide, onStop, onTogglePause, onSetStart }) {
   const [, tick] = useState(0);
   const [endArm, setEndArm] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
   useEffect(() => {
     const iv = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(iv);
@@ -2053,11 +2137,32 @@ function WorkoutBar({ startedAt, pausedAt, pausedAccum, hidden, onToggleHide, on
     else setEndArm(true);
   };
 
+  const openEdit = () => { setDraft(to24(startedAt)); setEditing(true); };
+  const commitStart = () => {
+    const ts = clockToTs(startedAt, draft);
+    if (ts != null && ts <= Date.now()) onSetStart(ts);
+    setEditing(false);
+  };
+
   return (
     <div className="ll-workbar">
       <Row style={{ gap: 8 }}>
         {(!hidden && label) ? (
-          <span className="ll-num" style={{ fontSize: 16, fontWeight: 700, color: pausedAt ? T.faint : T.ink }}>{label}</span>
+          editing ? (
+            <Row style={{ gap: 7 }}>
+              <input type="time" autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") commitStart(); if (e.key === "Escape") setEditing(false); }}
+                className="ll-input" style={{ width: 116, padding: "5px 7px", fontSize: 14 }} />
+              <button className="ll-btn ll-btn-chalk" onClick={commitStart}>Set</button>
+              <button className="ll-btn" aria-label="cancel edit" onClick={() => setEditing(false)}>✕</button>
+            </Row>
+          ) : (
+            <button aria-label="edit start time" title="Edit start time" onClick={openEdit}
+              style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", color: "inherit", padding: "6px 8px 6px 2px", marginRight: 8, display: "flex", alignItems: "center", gap: 7 }}>
+              <span className="ll-num" style={{ fontSize: 16, fontWeight: 700, color: pausedAt ? T.faint : T.ink }}>{label}</span>
+              <span style={{ fontSize: 13, color: T.faint }}>✎</span>
+            </button>
+          )
         ) : (
           <span style={{ fontSize: 11, letterSpacing: "0.1em", color: T.faint, textTransform: "uppercase" }}>
             Workout{pausedAt ? " · paused" : ""}
@@ -2083,7 +2188,7 @@ function WorkoutBar({ startedAt, pausedAt, pausedAccum, hidden, onToggleHide, on
       </Row>
       <Row style={{ gap: 8 }}>
         <button aria-label={hidden ? "show workout clock" : "hide workout clock"} onClick={onToggleHide}
-          style={{ background: "none", border: "none", color: T.faint, fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+          style={{ background: "none", border: "none", color: T.faint, fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: "6px 2px" }}>
           {hidden ? "show" : "hide"}
         </button>
         <RestTimer />
@@ -2312,7 +2417,7 @@ function App() {
         {loadError && <div className="ll-note" style={{ marginBottom: 10 }}>This browser is blocking storage — logs won't persist. Avoid private/incognito mode.</div>}
         {tab === "today" && <TodayView data={data} update={update} day={day} setDay={setDay} />}
         {tab === "progress" && (
-          <ProgressView data={data} day={day} setDay={setDay}
+          <ProgressView data={data} update={update} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
         {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
