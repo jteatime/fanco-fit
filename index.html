@@ -1084,7 +1084,7 @@ const CELEBRATIONS = [
   "You look like you need protein, hydration, and several inches in bed",
 ];
 
-function Celebration({ msg, from, refeed, reward, record, finale, onClose }) {
+function Celebration({ msg, from, image, refeed, reward, record, finale, onClose }) {
   const pieces = useMemo(
     () =>
       Array.from({ length: finale ? 240 : 140 }, (_, i) => {
@@ -1106,9 +1106,10 @@ function Celebration({ msg, from, refeed, reward, record, finale, onClose }) {
     []
   );
   useEffect(() => {
+    if (image) return;
     const t = setTimeout(onClose, 5000);
     return () => clearTimeout(t);
-  }, [onClose]);
+  }, [onClose, image]);
   return (
     <div className="ll-celebrate ll-fade" onClick={onClose}>
       {pieces.map((p, i) => (
@@ -1129,6 +1130,12 @@ function Celebration({ msg, from, refeed, reward, record, finale, onClose }) {
       <div className="ll-display" style={{ fontSize: 38, fontWeight: 700, marginTop: 12, lineHeight: 1.1 }}>{msg}</div>
       {from && (
         <div style={{ fontSize: 13, color: T.faint, marginTop: 8, letterSpacing: "0.08em" }}>💌 from {from}</div>
+      )}
+      {image && (
+        <>
+          <img src={image} alt="note attachment" style={{ maxWidth: "min(78vw, 320px)", maxHeight: "46vh", objectFit: "contain", borderRadius: 12, marginTop: 14, border: `1px solid ${T.line}` }} />
+          <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>tap to close</div>
+        </>
       )}
       {record && !finale && (
         <div className="ll-display" style={{ fontSize: 19, fontWeight: 700, letterSpacing: "0.14em", marginTop: 10, color: (reward && reward.color) || "#F6C851" }}>
@@ -1307,7 +1314,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
       finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)) };
     }
 
-    setCelebration({ msg, from: note ? PARTNER_NAME : null, refeed: preRefeed, reward: rewardOf(data), record, finale });
+    setCelebration({ msg, from: note ? PARTNER_NAME : null, image: note ? (note.image || null) : null, refeed: preRefeed, reward: rewardOf(data), record, finale });
     if (note && deliverNote) deliverNote(note.id);
     update((d) => {
       const s = d.sessions[sessionKey];
@@ -2129,17 +2136,44 @@ function ManageView({ data, update, reseed, restore }) {
   const [notePub, setNotePub] = useState(null);
   const [noteDate, setNoteDate] = useState("");
   const [noteText, setNoteText] = useState("");
-  useEffect(() => { if (CLOUD_SYNC.enabled) CLOUD_SYNC.fetchById(PARTNER_PUB).then(setNotePub); }, []);
+  const [noteImg, setNoteImg] = useState(null);
+  const [imgBusy, setImgBusy] = useState(false);
+  useEffect(() => {
+    if (!CLOUD_SYNC.enabled) return;
+    CLOUD_SYNC.fetchById(PARTNER_PUB).then((pub) => {
+      setNotePub(pub);
+      const acks = (pub && pub.acks) || {};
+      if ((data.sentNotes || []).some((n) => acks[n.id])) {
+        /* Once a note is seen there's no reason to keep it (or its photo) in the
+           local queue or the inbox row — drop it. */
+        update((d) => { d.sentNotes = (d.sentNotes || []).filter((n) => !acks[n.id]); pushInbox(d); });
+      }
+    });
+  }, []);
   const partnerName = PARTNER_NAME;
   const workoutDates = notePub && notePub.schedule ? upcomingWorkoutDates(notePub.schedule, 8) : [];
   const sentNotes = data.sentNotes || [];
   const pushInbox = (d) => { if (CLOUD_SYNC.enabled) CLOUD_SYNC.pushTo(PARTNER_INBOX, { notes: d.sentNotes || [] }); };
+  const pickImage = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    setImgBusy(true);
+    try { setNoteImg(await compressImage(f, 1000, 0.6)); } catch {}
+    setImgBusy(false);
+  };
   const sendNote = () => {
     const text = noteText.trim();
-    if (!text) return;
+    if (!text && !noteImg) return;
     const date = noteDate || workoutDates[0] || todayISO();
-    update((d) => { if (!d.sentNotes) d.sentNotes = []; d.sentNotes.push({ id: `${Date.now()}`, date, text, createdAt: Date.now() }); pushInbox(d); });
-    setNoteText(""); setNoteDate("");
+    update((d) => {
+      if (!d.sentNotes) d.sentNotes = [];
+      const note = { id: `${Date.now()}`, date, text, createdAt: Date.now() };
+      if (noteImg) note.image = noteImg;
+      d.sentNotes.push(note);
+      pushInbox(d);
+    });
+    setNoteText(""); setNoteDate(""); setNoteImg(null);
   };
   const removeNote = (id) => update((d) => { d.sentNotes = (d.sentNotes || []).filter((n) => n.id !== id); pushInbox(d); });
 
@@ -2348,8 +2382,19 @@ function ManageView({ data, update, reseed, restore }) {
             <textarea className="ll-input" value={noteText} placeholder={`Message for ${partnerName}…`}
               onChange={(e) => setNoteText(e.target.value)}
               style={{ width: "100%", minHeight: 60, resize: "vertical", padding: 8 }} />
-            <Row style={{ marginTop: 8 }}>
-              <button className="ll-btn ll-btn-chalk" style={{ opacity: noteText.trim() ? 1 : 0.5 }} disabled={!noteText.trim()} onClick={sendNote}>Send</button>
+            {noteImg && (
+              <div style={{ position: "relative", display: "inline-block", marginTop: 8 }}>
+                <img src={noteImg} alt="attachment preview" style={{ maxWidth: 140, maxHeight: 140, borderRadius: 8, display: "block", border: `1px solid ${T.line}` }} />
+                <button aria-label="remove photo" onClick={() => setNoteImg(null)}
+                  style={{ position: "absolute", top: -8, right: -8, width: 24, height: 24, borderRadius: 12, border: `1px solid ${T.line}`, background: T.surface2, color: T.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12, lineHeight: 1 }}>✕</button>
+              </div>
+            )}
+            <Row style={{ marginTop: 8, gap: 8 }}>
+              <label className="ll-btn ll-btn-sm" style={{ cursor: "pointer" }}>
+                {imgBusy ? "…" : noteImg ? "Change photo" : "Add photo"}
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={pickImage} />
+              </label>
+              <button className="ll-btn ll-btn-chalk" style={{ opacity: (noteText.trim() || noteImg) ? 1 : 0.5 }} disabled={!noteText.trim() && !noteImg} onClick={sendNote}>Send</button>
             </Row>
             {sentNotes.length > 0 && (
               <div style={{ marginTop: 12 }}>
@@ -2364,7 +2409,8 @@ function ManageView({ data, update, reseed, restore }) {
                             ? <span style={{ color: T.pos }}>seen {fmtDate(String(seen).slice(0, 10))}</span>
                             : <span style={{ color: T.faint }}>delivers when they train</span>}
                         </div>
-                        <div style={{ fontSize: 13.5, color: T.ink, marginTop: 1 }}>{n.text}</div>
+                        {n.text && <div style={{ fontSize: 13.5, color: T.ink, marginTop: 1 }}>{n.text}</div>}
+                        {n.image && <img src={n.image} alt="" style={{ maxWidth: 90, maxHeight: 90, borderRadius: 6, marginTop: 4, display: "block", border: `1px solid ${T.line}` }} />}
                       </div>
                       {!seen && <button className="ll-btn ll-btn-sm" aria-label="delete note" onClick={() => removeNote(n.id)}>✕</button>}
                     </Row>
@@ -2849,6 +2895,28 @@ function upcomingWorkoutDates(schedule, count) {
     iso = addDays(iso, 1);
   }
   return out;
+}
+
+/* Downscale + re-encode a picked photo to a small JPEG data URI on-device, so
+   an attached note stays small enough to sync and sit in storage. */
+function compressImage(file, maxEdge, quality) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      try { resolve(canvas.toDataURL("image/jpeg", quality)); }
+      catch (e) { reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("bad image")); };
+    img.src = url;
+  });
 }
 
 function App() {

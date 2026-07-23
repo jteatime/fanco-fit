@@ -168,6 +168,16 @@ celebration message** for a chosen workout day; it replaces the random
   just-sent note is caught.
 - **New blob fields:** `sentNotes: []`, `noteAcks: {}` (both in `buildSeed` +
   load-migration). Composer UI lives in Manage → "Note to <partner>".
+- **Auto-prune:** when the composer loads and reads the partner's `acks`, any
+  sent note that's been seen is removed from `sentNotes` and re-pushed out of the
+  inbox row (frees its photo from cloud + local storage). So the "sent" list is
+  effectively an outbox of *undelivered* notes; seen notes disappear.
+- **Photo attachments:** a note may carry an optional `image` (compressed JPEG
+  data URI). `compressImage(file, 1000, 0.6)` downscales on-device before it's
+  ever stored (~80–150 KB) — there is no raw-image path. The image rides inside
+  the note JSON (inbox row + sender's local queue); the recipient renders it
+  from memory and never persists it. A photo note makes the `Celebration`
+  overlay **stay open until tapped** (no 5s auto-close).
 - **Privacy:** notes ride the public anon key like everything else; the random
   row ids are the only guard. Never log them. No auth, no realtime.
 
