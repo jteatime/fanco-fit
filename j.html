@@ -250,6 +250,8 @@ function buildSeed() {
     nameAsked: false,
     theme: "iron",
     rewardId: "gold-star",
+    weights: {},
+    bwUnit: "lb",
     cycleNumber: 2,
     cycleName: "Cycle 2",
     cycleWeeks: 8,
@@ -1336,6 +1338,285 @@ function TodayView({ data, update, day, setDay }) {
 /* Progress view                                                       */
 /* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
+/* Trends — bodyweight, streak, charts                                 */
+/* ------------------------------------------------------------------ */
+const weightEntries = (data) =>
+  Object.entries(data.weights || {})
+    .map(([iso, v]) => ({ iso, v }))
+    .sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
+
+function weightTrend(data) {
+  const es = weightEntries(data).filter((e) => e.iso >= data.cycleStart);
+  if (es.length < 2) return null;
+  const first = es[0], last = es[es.length - 1];
+  return Math.round((last.v - first.v) * 10) / 10;
+}
+
+function scheduledSlots(data, uptoIso) {
+  const slots = [];
+  const totalW = weekOfCycle(data, uptoIso);
+  for (let w = 0; w <= totalW; w++) {
+    for (const day of DAYS) {
+      const date = cellDateFor(data.cycleStart, w, day);
+      if (date >= data.cycleStart && date <= uptoIso) slots.push({ day, date, week: w });
+    }
+  }
+  return slots.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+function currentStreak(data) {
+  const slots = scheduledSlots(data, todayISO());
+  let n = 0;
+  for (let i = slots.length - 1; i >= 0; i--) {
+    const sl = slots[i];
+    if (daySessionIn(data, sl.day, sl.week)) { n++; continue; }
+    if (sl.date === todayISO()) continue;
+    if (OPTIONAL_DAYS[sl.day]) continue;
+    break;
+  }
+  return n;
+}
+
+const sen = (sx) =>
+  (sx && sx.startedAt && sx.finishedAt)
+    ? Math.round((sx.finishedAt - sx.startedAt - (sx.pausedAccum || 0)) / 60000)
+    : null;
+
+function LineChart({ points, color, fmt, showValues }) {
+  const [sel, setSel] = useState(points.length - 1);
+  useEffect(() => { setSel(points.length - 1); }, [points.length]);
+
+  if (points.length === 0)
+    return <div style={{ color: T.muted, fontSize: 13, padding: "18px 4px" }}>Not enough data yet — log a couple of sessions.</div>;
+  if (points.length === 1) {
+    const p = points[0];
+    return (
+      <div style={{ padding: "10px 4px" }}>
+        <div className="ll-num" style={{ fontSize: 20, fontWeight: 700, color: T.ink }}>{fmt(p.value)}</div>
+        <div style={{ color: T.muted, fontSize: 12.5, marginTop: 3 }}>{p.label} · one more session draws the line.</div>
+      </div>
+    );
+  }
+
+  const W = 320, H = 150, padX = 6, padB = 22;
+  const padT = showValues ? 26 : 16;
+  const vals = points.map((p) => p.value);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = (hi - lo) || Math.abs(hi) || 1;
+  lo = Math.max(0, lo - span * 0.18);
+  hi = hi + span * 0.18;
+  const x = (i) => padX + (i / (points.length - 1)) * (W - padX * 2);
+  const y = (v) => padT + (1 - (v - lo) / (hi - lo || 1)) * (H - padT - padB);
+
+  const gid = "grad-" + color.replace(/[^a-z0-9]/gi, "");
+  const linePath = "M" + points.map((p, i) => `${x(i)},${y(p.value)}`).join(" L");
+  const areaPath = linePath + ` L${x(points.length - 1)},${H - padB} L${x(0)},${H - padB} Z`;
+  const step = Math.ceil(points.length / 6);
+  const activeIdx = Math.min(sel, points.length - 1);
+  const ap = points[activeIdx];
+  const vStep = Math.ceil(points.length / 10);
+
+  return (
+    <div>
+      <Row style={{ justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: 11.5, color: T.faint }}>{ap.label}{ap.sub ? ` · ${ap.sub}` : ""}</span>
+        <span className="ll-num" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(ap.value)}</span>
+      </Row>
+      <svg viewBox="0 0 320 150" style={{ width: "100%", height: "auto", display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.5, 1].map((f) => {
+          const gy = padT + f * (H - padT - padB);
+          return <line key={f} x1={padX} x2={W - padX} y1={gy} y2={gy} stroke={T.line} strokeDasharray="3 4" strokeWidth="1" />;
+        })}
+        <path d={areaPath} fill={`url(#${gid})`} />
+        <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        {points.map((p, i) => {
+          const show = i === points.length - 1 || i % step === 0;
+          return show
+            ? <text key={`t${i}`} x={x(i)} y={H - 6} fontSize="9" fill={T.faint} textAnchor="middle">{p.short}</text>
+            : null;
+        })}
+        {points.map((p, i) => (
+          <g key={`p${i}`}>
+            <circle cx={x(i)} cy={y(p.value)} r="12" fill="transparent" style={{ cursor: "pointer" }} onClick={() => setSel(i)} />
+            {i === sel
+              ? <circle cx={x(i)} cy={y(p.value)} r="4.5" fill={color} />
+              : <circle cx={x(i)} cy={y(p.value)} r="2.8" fill={T.bg} stroke={color} strokeWidth="1.5" />}
+          </g>
+        ))}
+        {showValues && points.map((p, i) => {
+          const shown = i % vStep === 0 || i === points.length - 1 || i === activeIdx;
+          if (!shown) return null;
+          const active = i === activeIdx;
+          return <text key={`v${i}`} x={x(i)} y={y(p.value) - 9} textAnchor="middle" fontSize="8.5"
+            fontWeight={active ? 700 : 400} fill={active ? color : T.muted}>{p.value}</text>;
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function StatStrip({ data }) {
+  const es = weightEntries(data);
+  const latest = es.length ? es[es.length - 1].v : null;
+  const trend = weightTrend(data);
+  const streak = currentStreak(data);
+
+  let wins = 0;
+  DAYS.forEach((d) => {
+    const list = sortedSessions(data).filter(
+      (s) => s.day === d && weekOfCycle(data, s.date) >= 0 && Object.values(s.entries).some(entryHasData)
+    );
+    for (let i = 1; i < list.length; i++) {
+      if (dayVolume(list[i]) > dayVolume(list[i - 1])) wins += 1;
+    }
+  });
+
+  const trendStr = trend == null ? "—" : (trend < 0 ? `−${Math.abs(trend)}` : `+${trend}`);
+  const tiles = [
+    { label: "Weight", value: latest != null ? `${latest}` : "—" },
+    { label: "Trend", value: trendStr, color: trend == null ? null : T.blue },
+    { label: "Streak", value: String(streak) },
+    { label: "Wins", value: String(wins) },
+  ];
+
+  return (
+    <Row style={{ gap: 8, marginBottom: 14 }}>
+      {tiles.map((t) => (
+        <div key={t.label} className="ll-card" style={{ flex: 1, margin: 0, padding: "9px 4px", textAlign: "center" }}>
+          <div className="ll-num" style={{ fontSize: 15, fontWeight: 700, color: t.color || T.ink }}>{t.value}</div>
+          <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", color: T.faint, marginTop: 2 }}>{t.label}</div>
+        </div>
+      ))}
+    </Row>
+  );
+}
+
+function TrendCard({ data, update, day }) {
+  const [metric, setMetric] = useState("volume");
+  const [scope, setScope] = useState("all");
+  const [wInput, setWInput] = useState("");
+  const [wDate, setWDate] = useState(todayISO());
+  const bwUnit = data.bwUnit || "lb";
+  const collapsed = !!data.chartsCollapsed;
+
+  const inCycle = sortedSessions(data).filter(
+    (s) => weekOfCycle(data, s.date) >= 0 && Object.values(s.entries).some(entryHasData)
+  );
+
+  const byWeek = {};
+  inCycle.forEach((s) => {
+    const w = weekOfCycle(data, s.date);
+    (byWeek[w] = byWeek[w] || []).push(s);
+  });
+  const weeks = Object.keys(byWeek).map(Number).sort((a, b) => a - b);
+  const scoped = scope === "day" ? inCycle.filter((s) => s.day === day) : inCycle;
+  const domShort = (iso) => String(new Date(iso + "T12:00:00").getDate());
+
+  let chart;
+  if (metric === "weight") {
+    const pts = weightEntries(data).map((e) => ({ label: fmtDate(e.iso), short: e.iso.slice(8, 10), value: e.v }));
+    chart = { points: pts, color: T.blue, fmt: (v) => `${v} ${bwUnit}` };
+  } else if (metric === "duration") {
+    const pts = scope === "all"
+      ? weeks.map((w) => ({ w, ds: byWeek[w].map(sen).filter((x) => x != null && x > 0) }))
+          .filter((x) => x.ds.length)
+          .map((x) => ({
+            label: `Week ${x.w + 1} average`,
+            short: `W${x.w + 1}`,
+            value: Math.round(x.ds.reduce((a, b) => a + b, 0) / x.ds.length),
+            sub: `${x.ds.length} timed sessions`,
+          }))
+      : scoped.map((s) => ({ s, d: sen(s) })).filter((x) => x.d != null && x.d > 0)
+          .map((x) => ({ label: `${x.s.day} · ${fmtDate(x.s.date)}`, short: domShort(x.s.date), value: x.d }));
+    chart = { points: pts, color: T.amber, fmt: (n) => `${n} min` };
+  } else {
+    const pts = scope === "all"
+      ? weeks.map((w) => {
+          const list = byWeek[w];
+          return { label: `Week ${w + 1}`, short: `W${w + 1}`, value: list.reduce((a, s) => a + dayVolume(s), 0), sub: `${list.length} sessions` };
+        })
+      : scoped.map((s) => ({ label: `${s.day} · ${fmtDate(s.date)}`, short: domShort(s.date), value: dayVolume(s) }));
+    chart = { points: pts, color: T.pos, fmt: fmtVol };
+  }
+
+  const saveWeight = () => {
+    const v = parseFloat(wInput);
+    if (!(v > 0)) return;
+    const rounded = Math.round(v * 10) / 10;
+    const iso = /^\d{4}-\d{2}-\d{2}$/.test(wDate) ? wDate : todayISO();
+    update((d) => { if (!d.weights) d.weights = {}; d.weights[iso] = rounded; });
+    setWInput("");
+  };
+
+  let durText = null;
+  if (metric === "duration") {
+    const src = scope === "day" ? inCycle.filter((s) => s.day === day) : inCycle;
+    const durList = src.map(sen).filter((x) => x != null && x > 0);
+    if (durList.length) {
+      const avg = Math.round(durList.reduce((a, b) => a + b, 0) / durList.length);
+      const longest = Math.max(...durList);
+      durText = (scope === "all" ? "Weekly average session length. " : "") +
+        `Average ${avg} min · longest ${longest} min · ${durList.length} timed sessions`;
+    }
+  }
+
+  const chip = (on, lbl, onClick) => (
+    <button key={lbl} className={`ll-chip ll-day ${on ? "on" : ""}`}
+      style={on ? { borderColor: T.blue, color: T.blue } : {}} onClick={onClick}>{lbl}</button>
+  );
+
+  return (
+    <div className="ll-card" style={{ padding: 14, marginBottom: 14 }}>
+      <div role="button" aria-expanded={!collapsed}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", marginBottom: collapsed ? 0 : 10, padding: "2px 0" }}
+        onClick={() => update((d) => { d.chartsCollapsed = !d.chartsCollapsed; })}>
+        <span className="ll-display" style={{ fontSize: 15, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.muted }}>Trends</span>
+        <Row style={{ gap: 5 }}>
+          <span style={{ fontSize: 11, color: T.faint }}>{collapsed ? "expand" : "collapse"}</span>
+          <span style={{ fontSize: 13, color: T.faint }}>{collapsed ? "▸" : "▾"}</span>
+        </Row>
+      </div>
+      {collapsed ? null : (
+        <>
+          <Row style={{ gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+            {[["volume", "Volume"], ["duration", "Time"], ["weight", "Bodyweight"]].map(([m, lbl]) =>
+              chip(metric === m, lbl, () => setMetric(m)))}
+            {metric !== "weight" && (
+              <Row style={{ gap: 6, marginLeft: "auto" }}>
+                {[["all", "Weekly"], ["daily", "Daily"], ["day", day.slice(0, 3)]].map(([sc, lbl]) =>
+                  chip(scope === sc, lbl, () => setScope(sc)))}
+              </Row>
+            )}
+          </Row>
+          <LineChart points={chart.points} color={chart.color} fmt={chart.fmt} showValues={metric === "weight"} />
+          {metric === "weight" && (
+            <div style={{ marginTop: 12 }}>
+              <Row style={{ gap: 8 }}>
+                <input type="date" value={wDate} max={todayISO()} onChange={(e) => setWDate(e.target.value)}
+                  className="ll-input" style={{ flex: 1, padding: "6px 8px" }} />
+                <input className="ll-input" inputMode="decimal" value={wInput} placeholder={bwUnit}
+                  onChange={(e) => setWInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveWeight(); }}
+                  style={{ width: 84, textAlign: "center", padding: "6px 8px" }} />
+                <button className="ll-btn ll-btn-chalk" onClick={saveWeight}>Log</button>
+              </Row>
+              <div style={{ color: T.faint, fontSize: 11.5, marginTop: 8 }}>Backdate freely — pick any date to import readings from another app. Same date overwrites.</div>
+            </div>
+          )}
+          {durText && <div style={{ color: T.faint, fontSize: 11, marginTop: 10 }}>{durText}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Cycle grid — the whole cycle at a glance, like the sheet's columns  */
 /* ------------------------------------------------------------------ */
 function CycleGrid({ data, onOpenDay, onGoToday }) {
@@ -1658,8 +1939,10 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
         })}
       </Row>
       <div className="ll-display" style={{ fontSize: 26, fontWeight: 700, marginBottom: 2 }}>Progress</div>
-      <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>Week-over-week total volume, same machine only</div>
+      <div style={{ color: T.muted, fontSize: 13, marginBottom: 12 }}>{data.cycleName || `Cycle ${data.cycleNumber}`}</div>
+      <StatStrip data={data} />
       <CycleGrid data={data} onOpenDay={setOpenDayKey} onGoToday={onGoToday} />
+      <TrendCard data={data} update={update} day={day} />
       {exList.map((ex) => {
         const hist = historyFor(data, ex.id);
         const last = hist[hist.length - 1];
@@ -1862,23 +2145,27 @@ function ManageView({ data, update, reseed, restore }) {
 
       {/* Units */}
       <div className="ll-card" style={{ padding: 14 }}>
-        <Row style={{ justifyContent: "space-between" }}>
-          <div>
-            <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>Units</div>
-            <div style={{ color: T.muted, fontSize: 12.5, marginTop: 2 }}>
-              Label only — your logged numbers never convert.
-            </div>
-          </div>
-          <Row style={{ gap: 6 }}>
-            {["kg", "lb"].map((u) => (
-              <button key={u} className={`ll-chip ${(data.unit || "kg") === u ? "on" : ""}`}
-                style={(data.unit || "kg") === u ? { borderColor: T.amber, color: T.amber } : {}}
-                onClick={() => update((d) => { d.unit = u; })}>
-                {u}
-              </button>
-            ))}
+        <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>Units</div>
+        <div style={{ color: T.muted, fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>
+          Label only — your logged numbers never convert.
+        </div>
+        {[["Lifting", "unit", "kg"], ["Bodyweight", "bwUnit", "lb"]].map(([lbl, key, def], ri) => (
+          <Row key={key} style={{ justifyContent: "space-between", marginTop: ri ? 8 : 0 }}>
+            <span style={{ color: T.muted, fontSize: 13.5 }}>{lbl}</span>
+            <Row style={{ gap: 6 }}>
+              {["kg", "lb"].map((u) => {
+                const on = (data[key] || def) === u;
+                return (
+                  <button key={u} className={`ll-chip ll-day ${on ? "on" : ""}`}
+                    style={on ? { borderColor: T.amber, color: T.amber } : {}}
+                    onClick={() => update((d) => { d[key] = u; })}>
+                    {u}
+                  </button>
+                );
+              })}
+            </Row>
           </Row>
-        </Row>
+        ))}
       </div>
 
       {/* Cycle */}
@@ -2334,6 +2621,8 @@ function App() {
           if (REFEED_ROTATION && !parsed.refeedDay) parsed.refeedDay = "Saturday";
           if (!parsed.theme) parsed.theme = "iron";
           if (!parsed.rewardId) parsed.rewardId = "gold-star";
+          if (!parsed.weights) parsed.weights = {};
+          if (!parsed.bwUnit) parsed.bwUnit = "lb";
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
           setData(parsed);
