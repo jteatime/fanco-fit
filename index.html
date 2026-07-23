@@ -2138,18 +2138,26 @@ function ManageView({ data, update, reseed, restore }) {
   const [noteText, setNoteText] = useState("");
   const [noteImg, setNoteImg] = useState(null);
   const [imgBusy, setImgBusy] = useState(false);
+  const [seenToast, setSeenToast] = useState(null);
   useEffect(() => {
     if (!CLOUD_SYNC.enabled) return;
     CLOUD_SYNC.fetchById(PARTNER_PUB).then((pub) => {
       setNotePub(pub);
       const acks = (pub && pub.acks) || {};
-      if ((data.sentNotes || []).some((n) => acks[n.id])) {
-        /* Once a note is seen there's no reason to keep it (or its photo) in the
-           local queue or the inbox row — drop it. */
+      const seen = (data.sentNotes || []).filter((n) => acks[n.id]);
+      if (seen.length) {
+        /* Flash a "she saw it" confirmation, then drop the seen note(s) — no
+           reason to keep them (or their photos) in the queue or the inbox row. */
+        setSeenToast(`💌 ${PARTNER_NAME} saw your ${seen.length > 1 ? "notes" : "note"}`);
         update((d) => { d.sentNotes = (d.sentNotes || []).filter((n) => !acks[n.id]); pushInbox(d); });
       }
     });
   }, []);
+  useEffect(() => {
+    if (!seenToast) return;
+    const t = setTimeout(() => setSeenToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [seenToast]);
   const partnerName = PARTNER_NAME;
   const workoutDates = notePub && notePub.schedule ? upcomingWorkoutDates(notePub.schedule, 8) : [];
   const sentNotes = data.sentNotes || [];
@@ -2247,6 +2255,11 @@ function ManageView({ data, update, reseed, restore }) {
 
   return (
     <div>
+      {seenToast && (
+        <div className="ll-fade" style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 130, background: T.surface2, border: `1px solid ${T.pos}`, color: T.ink, borderRadius: 999, padding: "9px 16px", fontSize: 13, fontWeight: 600, boxShadow: "0 6px 20px rgba(0,0,0,0.35)" }}>
+          {seenToast}
+        </div>
+      )}
       <div className="ll-display" style={{ fontSize: 26, fontWeight: 700, marginBottom: 12 }}>Manage</div>
 
       {/* Refeed day */}
