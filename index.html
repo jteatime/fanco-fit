@@ -512,7 +512,7 @@ function buildSheetRows(data) {
   const h2 = ["", ""];
   for (let w = 0; w < weeks; w++) {
     for (let i = 0; i < SETS; i++) {
-      h1.push(i === 0 ? `Week ${w + 1}` : "");
+      h1.push(i === 0 ? `Week ${w + 1}${isDeloadWeek(data, w) ? " (deload)" : ""}` : "");
       h2.push(String(i + 1));
     }
   }
@@ -521,7 +521,9 @@ function buildSheetRows(data) {
   const extras = [];
   for (const day of DAYS) {
     rows.push([day]);
-    for (const ex of data.exercises.filter((e) => e.day === day)) {
+    /* union of the normal program and any deload-only movements, so a
+       deload week's work is not silently dropped from the export */
+    for (const ex of allKnownExercises(data).filter((e) => e.day === day)) {
       const r = [ex.name, ex.prev ?? ""];
       for (let w = 0; w < weeks; w++) {
         const sess = sessions.find(
