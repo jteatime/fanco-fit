@@ -377,10 +377,13 @@ const isDeloadSess = (data, s) => isDeloadWeek(data, weekOfCycle(data, s.date));
 
 /* The exercise list for a day in a given week — the deload plan replaces
    the normal program entirely during a deload week. */
-const exListFor = (data, day, w) =>
-  isDeloadWeek(data, w)
-    ? ((data.deloadPlan || {})[day] || [])
-    : data.exercises.filter((e) => e.day === day);
+const exListFor = (data, day, w) => {
+  if (!isDeloadWeek(data, w)) return data.exercises.filter((e) => e.day === day);
+  /* undefined = this day was never seeded (e.g. rotated in by a refeed-day
+     change) -> fall back to the program. [] = deliberately emptied -> rest day. */
+  const plan = (data.deloadPlan || {})[day];
+  return plan || data.exercises.filter((e) => e.day === day);
+};
 
 /* Copy the current program into the deload plan at half the planned sets.
    Runs once per day; a day already in the plan is never overwritten.
@@ -421,6 +424,7 @@ function lastEntryFor(data, exId, variantId, excludeKey, beforeDate) {
     const s = list[i];
     if (s.key === excludeKey) continue;
     if (beforeDate && s.date >= beforeDate) continue;
+    if (isDeloadSess(data, s)) continue;
     const e = s.entries[exId];
     if (!entryHasData(e)) continue;
     if (variantId && e.variantId !== variantId) continue;
@@ -659,7 +663,11 @@ function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
 /* ------------------------------------------------------------------ */
 /* Exercise card (Today view)                                          */
 /* ------------------------------------------------------------------ */
-function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
+function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
+  /* The array this card's exercise actually lives in. Deload plan entries
+     keep the program's ids, so writing to d.exercises during a deload week
+     would mutate the real program instead of the plan. */
+  const exHome = (d) => (isDeload ? ((d.deloadPlan || {})[ex.day] || []) : d.exercises);
   const [open, setOpen] = useState(false);
   const [addingMachine, setAddingMachine] = useState(false);
   const [machineName, setMachineName] = useState("");
@@ -852,7 +860,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
               <button key={v.id} className={`ll-chip ${v.id === variantId ? "on" : ""}`}
                 onClick={() =>
                   update((d) => {
-                    const dex = d.exercises.find((x) => x.id === ex.id);
+                    const dex = exHome(d).find((x) => x.id === ex.id);
                     dex.activeVariant = v.id;
                     const s = d.sessions[sessionKey];
                     if (s && s.entries[ex.id]) s.entries[ex.id].variantId = v.id;
@@ -865,7 +873,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                       e.stopPropagation();
                       if (removeArm !== v.id) { setRemoveArm(v.id); setTimeout(() => setRemoveArm(null), 3000); return; }
                       update((d) => {
-                        const dex = d.exercises.find((x) => x.id === ex.id);
+                        const dex = exHome(d).find((x) => x.id === ex.id);
                         dex.variants = dex.variants.filter((vv) => vv.id !== v.id);
                         if (dex.activeVariant === v.id) dex.activeVariant = "main";
                         const sN = d.sessions[sessionKey];
@@ -887,7 +895,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                   const name = machineName.trim();
                   if (!name) return;
                   update((d) => {
-                    const dex = d.exercises.find((x) => x.id === ex.id);
+                    const dex = exHome(d).find((x) => x.id === ex.id);
                     const vid = slug(name) + "-" + dex.variants.length;
                     dex.variants.push({ id: vid, name });
                     dex.activeVariant = vid;
@@ -927,7 +935,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor }) {
                   : [];
                 return todaySets.map((s, i) => (
                   <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
-                    compareSet={!s.extra ? lastLogged[i] : undefined}
+                    compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
                     onChange={(ns) => changeSet(i, ns)}
                     onRemove={() => update((d) => { ensureEntry(d).sets.splice(i, 1); })} />
                 ));
@@ -1114,7 +1122,8 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
   const existing = daySessionIn(data, day, wIdx);
   const dateFor = existing ? existing.date : cellDateFor(data.cycleStart, wIdx, day);
   const sessionKey = existing ? existing.key : `${dateFor}|${day}`;
-  const exList = data.exercises.filter((e) => e.day === day);
+  const isDeload = isDeloadWeek(data, wIdx);
+  const exList = exListFor(data, day, wIdx);
   const isToday = dateFor === todayISO();
 
   const sess = data.sessions[sessionKey];
@@ -1306,7 +1315,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
             {day} <span style={{ color: T.muted, fontSize: 17, fontWeight: 500 }}>· {fmtDate(dateFor)}</span>
           </div>
           <div style={{ color: T.muted, fontSize: 13 }}>
-            Cycle {data.cycleNumber} · Week {wIdx + 1}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
+            Cycle {data.cycleNumber} · Week {wIdx + 1}{isDeload ? " · ☾ deload" : ""}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
           </div>
         </div>
       </Row>
@@ -1349,7 +1358,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
         </button>
       )}
       {exList.map((ex) => (
-        <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} />
+        <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
       ))}
       {exList.length > 0 && weekOffset === 0 && (() => {
         const done = !!(sess && sess.celebrated);
