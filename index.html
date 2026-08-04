@@ -406,7 +406,9 @@ const weekOfCycle = (data, iso) =>
    normally but must never enter a volume comparison: no rep targets, no
    green/red, no star, no record, and no contribution to cycle totals. */
 const isDeloadWeek = (data, w) => (data.deloadWeeks || []).includes(w);
-const isDeloadSess = (data, s) => isDeloadWeek(data, weekOfCycle(data, s.date));
+/* s.deload is a durable stamp written at cycle rollover: once cycleStart
+   moves, the derived week index of older sessions is no longer meaningful. */
+const isDeloadSess = (data, s) => !!s.deload || isDeloadWeek(data, weekOfCycle(data, s.date));
 
 /* The exercise list for a day in a given week — the deload plan replaces
    the normal program entirely during a deload week. */
@@ -630,7 +632,11 @@ function dayWeekStatus(data, d, wArg) {
   }
   const dateIso = cellDateFor(data.cycleStart, w, d);
   if (dateIso === today) return "today";
-  if (dateIso < today) return OPTIONAL_DAYS[d] ? "optional" : "missed";
+  if (dateIso < today) {
+    /* A deload day the user deliberately emptied is planned rest, not a miss */
+    if (isDeloadWeek(data, w) && exListFor(data, d, w).length === 0) return "optional";
+    return OPTIONAL_DAYS[d] ? "optional" : "missed";
+  }
   return "future";
 }
 
@@ -1352,7 +1358,12 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
     /* Cycle finale: this finish closes out the final week's schedule */
     let finale = null;
     const finalW = (data.cycleWeeks || 8) - 1;
-    if (wIdx === finalW && DAYS.every((dd) => OPTIONAL_DAYS[dd] || dd === day || daySessionIn(data, dd, wIdx))) {
+    /* An emptied deload day never produces a session — it is planned rest,
+       so it must not hold the finale hostage. */
+    const dayClosed = (dd) =>
+      OPTIONAL_DAYS[dd] || dd === day || daySessionIn(data, dd, wIdx) ||
+      (isDeloadWeek(data, wIdx) && exListFor(data, dd, wIdx).length === 0);
+    if (wIdx === finalW && DAYS.every(dayClosed)) {
       const inCycle = sortedSessions(data).filter((x) => weekOfCycle(data, x.date) >= 0 && !isDeloadSess(data, x));
       const vol = inCycle.reduce((a, x) => a + dayVolume(x), 0);
       let wins = 0;
@@ -1928,7 +1939,8 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                   style.cursor = "pointer";
                   onClick = () => onGoToday(d);
                 } else if (dateIso < today) {
-                  if (OPTIONAL_DAYS[d]) {
+                  /* Emptied deload day = planned rest, same treatment as optional */
+                  if (OPTIONAL_DAYS[d] || (isDeloadWeek(data, w) && exListFor(data, d, w).length === 0)) {
                     content = "•";
                     style.opacity = 0.55;
                   } else {
@@ -2334,9 +2346,11 @@ function ManageView({ data, update, reseed, restore }) {
   const editingDeload = deloadOn && schedTab === "deload";
 
   /* Read side: which array the day card renders */
+  /* Mirrors exListFor exactly: undefined = never seeded -> the program trains
+     that day, so show it. [] = deliberately emptied -> genuinely a rest day. */
   const listFor = (day) =>
     editingDeload
-      ? ((data.deloadPlan || {})[day] || [])
+      ? ((data.deloadPlan || {})[day] || data.exercises.filter((e) => e.day === day))
       : data.exercises.filter((e) => e.day === day);
 
   /* Write side: the array to mutate inside update(). In normal mode this is
@@ -2345,12 +2359,20 @@ function ManageView({ data, update, reseed, restore }) {
   const mutListFor = (d, day) => {
     if (!editingDeload) return d.exercises;
     d.deloadPlan = d.deloadPlan || {};
-    d.deloadPlan[day] = d.deloadPlan[day] || [];
+    /* Never seeded -> the card is rendering the program as a fallback, so seed
+       copies of those same rows. An empty array here would strand every edit:
+       findEx would miss the row the user is looking at. [] stays [] — that is
+       a deliberately emptied rest day, not a missing one. */
+    if (!d.deloadPlan[day]) {
+      d.deloadPlan[day] = d.exercises
+        .filter((e) => e.day === day)
+        .map((e) => ({ ...e, variants: e.variants.map((v) => ({ ...v })) }));
+    }
     return d.deloadPlan[day];
   };
   const findEx = (d, day, id) => mutListFor(d, day).find((x) => x.id === id);
   const removeEx = (d, day, id) => {
-    if (editingDeload) d.deloadPlan[day] = (d.deloadPlan[day] || []).filter((x) => x.id !== id);
+    if (editingDeload) d.deloadPlan[day] = mutListFor(d, day).filter((x) => x.id !== id);
     else d.exercises = d.exercises.filter((x) => x.id !== id);
   };
 
@@ -2358,6 +2380,13 @@ function ManageView({ data, update, reseed, restore }) {
 
   const startNewCycle = () =>
     update((d) => {
+      /* Week indices are about to be re-anchored to the new cycleStart, which
+         would erase these sessions' derived deload status. Stamp it durably.
+         Must run while the OLD cycleStart is still in effect — as must the
+         prev recompute below, which reads it through lastEntryFor. */
+      for (const s of Object.values(d.sessions)) {
+        if (isDeloadSess(d, s)) s.deload = true;
+      }
       d.exercises.forEach((ex) => {
         const last = lastEntryFor(d, ex.id, null, null);
         if (last) {
