@@ -2478,7 +2478,7 @@ function ManageView({ data, update, reseed, restore }) {
                 color: schedTab === k ? T.blue : T.muted,
                 background: schedTab === k ? "rgba(91,157,255,0.12)" : "transparent",
               }}
-              onClick={() => setSchedTab(k)}>{lbl}</button>
+              onClick={() => { setSchedTab(k); setEditing(null); setNewNames({}); }}>{lbl}</button>
           ))}
         </Row>
       )}
