@@ -2391,6 +2391,42 @@ function ManageView({ data, update, reseed, restore }) {
           <button className="ll-btn ll-btn-sm" onClick={() => update((d) => { d.cycleWeeks = (d.cycleWeeks || 8) + 1; })}>+</button>
           <span style={{ color: T.faint, fontSize: 12.5, marginLeft: "auto" }}>Started {fmtDate(data.cycleStart)} · week {weekNum}</span>
         </Row>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ color: T.muted, fontSize: 13, marginBottom: 6 }}>Deload weeks</div>
+          <Row style={{ gap: 6, flexWrap: "wrap" }}>
+            {Array.from({ length: data.cycleWeeks || 8 }, (_, i) => {
+              const on = isDeloadWeek(data, i);
+              return (
+                <button key={i} className="ll-btn ll-btn-sm"
+                  aria-pressed={on}
+                  aria-label={`Week ${i + 1}${on ? ", deload week" : ""}`}
+                  style={{
+                    minWidth: 40,
+                    borderColor: on ? T.blue : T.line,
+                    color: on ? T.blue : T.muted,
+                    background: on ? "rgba(91,157,255,0.12)" : "transparent",
+                  }}
+                  onClick={() => update((d) => {
+                    const list = (d.deloadWeeks || []).slice();
+                    const at = list.indexOf(i);
+                    if (at >= 0) {
+                      list.splice(at, 1);
+                    } else {
+                      list.push(i);
+                      list.sort((a, b) => a - b);
+                      seedDeloadPlan(d);
+                    }
+                    d.deloadWeeks = list;
+                  })}>
+                  {on ? "☾ " : ""}{i + 1}
+                </button>
+              );
+            })}
+          </Row>
+          <div style={{ color: T.faint, fontSize: 12, marginTop: 6 }}>
+            Lighter recovery weeks. Kept out of volume totals, records, streaks and rep targets.
+          </div>
+        </div>
         <div style={{ color: T.muted, fontSize: 13, marginBottom: 10 }}>
           Starting a new cycle saves each exercise's latest top weight as its "last cycle" reference — the number you used to copy into the Prev column.
         </div>
