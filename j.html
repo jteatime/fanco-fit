@@ -2177,6 +2177,31 @@ function ManageView({ data, update, reseed, restore }) {
   const [editing, setEditing] = useState(null);
   const [editText, setEditText] = useState("");
 
+  const [schedTab, setSchedTab] = useState("normal");
+  const deloadOn = (data.deloadWeeks || []).length > 0;
+  const editingDeload = deloadOn && schedTab === "deload";
+
+  /* Read side: which array the day card renders */
+  const listFor = (day) =>
+    editingDeload
+      ? ((data.deloadPlan || {})[day] || [])
+      : data.exercises.filter((e) => e.day === day);
+
+  /* Write side: the array to mutate inside update(). In normal mode this is
+     the whole flat exercises array; in deload mode it is that day's plan.
+     Reorder and rename both locate by id, so the same code works for both. */
+  const mutListFor = (d, day) => {
+    if (!editingDeload) return d.exercises;
+    d.deloadPlan = d.deloadPlan || {};
+    d.deloadPlan[day] = d.deloadPlan[day] || [];
+    return d.deloadPlan[day];
+  };
+  const findEx = (d, day, id) => mutListFor(d, day).find((x) => x.id === id);
+  const removeEx = (d, day, id) => {
+    if (editingDeload) d.deloadPlan[day] = (d.deloadPlan[day] || []).filter((x) => x.id !== id);
+    else d.exercises = d.exercises.filter((x) => x.id !== id);
+  };
+
   const weekNum = Math.max(1, Math.floor((new Date(todayISO()) - new Date(data.cycleStart)) / (7 * 864e5)) + 1);
 
   const startNewCycle = () =>
@@ -2443,33 +2468,47 @@ function ManageView({ data, update, reseed, restore }) {
       </div>
 
       {/* Schedule */}
+      {deloadOn && (
+        <Row style={{ gap: 6, marginBottom: 2 }}>
+          {[["normal", "Normal"], ["deload", "☾ Deload"]].map(([k, lbl]) => (
+            <button key={k} className="ll-btn ll-btn-sm"
+              aria-pressed={schedTab === k}
+              style={{
+                borderColor: schedTab === k ? T.blue : T.line,
+                color: schedTab === k ? T.blue : T.muted,
+                background: schedTab === k ? "rgba(91,157,255,0.12)" : "transparent",
+              }}
+              onClick={() => setSchedTab(k)}>{lbl}</button>
+          ))}
+        </Row>
+      )}
       {DAYS.map((day) => (
         <div key={day} className="ll-card" style={{ padding: 14 }}>
           <Row style={{ gap: 8, marginBottom: 10 }}>
             <span style={{ width: 10, height: 10, borderRadius: 5, background: DAY_COLOR[day] }} />
             <span className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>{day}</span>
           </Row>
-          {data.exercises.filter((e) => e.day === day).map((ex, i, arr) => (
+          {listFor(day).map((ex, i, arr) => (
             <Row key={ex.id} style={{ justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
               {editing === ex.id ? (
                 <div style={{ flex: 1 }}>
                   <Row>
                     <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
-                      value={ex.icon || ""} onChange={(e) => update((d) => { d.exercises.find((x) => x.id === ex.id).icon = e.target.value; })} />
+                      value={ex.icon || ""} onChange={(e) => update((d) => { findEx(d, day, ex.id).icon = e.target.value; })} />
                     <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
                     <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
                       const t = editText.trim();
-                      if (t) update((d) => { d.exercises.find((x) => x.id === ex.id).name = t; });
+                      if (t) update((d) => { findEx(d, day, ex.id).name = t; });
                       setEditing(null);
                     }}>Done</button>
                   </Row>
                   <Row style={{ marginTop: 6, gap: 8 }}>
                     <span style={{ color: T.muted, fontSize: 13 }}>Planned sets:</span>
                     <button className="ll-btn ll-btn-sm" onClick={() =>
-                      update((d) => { const x = d.exercises.find((x) => x.id === ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
+                      update((d) => { const x = findEx(d, day, ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
                     <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{ex.targetSets || 3}</span>
                     <button className="ll-btn ll-btn-sm" onClick={() =>
-                      update((d) => { const x = d.exercises.find((x) => x.id === ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
+                      update((d) => { const x = findEx(d, day, ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
                   </Row>
                 </div>
               ) : (
@@ -2480,21 +2519,21 @@ function ManageView({ data, update, reseed, restore }) {
                   <Row style={{ gap: 4 }}>
                     <button className="ll-btn ll-btn-sm" disabled={i === 0} style={{ opacity: i === 0 ? 0.35 : 1 }}
                       onClick={() => update((d) => {
-                        const list = d.exercises;
+                        const list = mutListFor(d, day);
                         const idxA = list.findIndex((x) => x.id === ex.id);
                         const idxB = list.findIndex((x) => x.id === arr[i - 1].id);
                         [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
                       })}>↑</button>
                     <button className="ll-btn ll-btn-sm" disabled={i === arr.length - 1} style={{ opacity: i === arr.length - 1 ? 0.35 : 1 }}
                       onClick={() => update((d) => {
-                        const list = d.exercises;
+                        const list = mutListFor(d, day);
                         const idxA = list.findIndex((x) => x.id === ex.id);
                         const idxB = list.findIndex((x) => x.id === arr[i + 1].id);
                         [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
                       })}>↓</button>
                     <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(ex.id); setEditText(ex.name); }}>✎</button>
                     <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
-                      onClick={() => update((d) => { d.exercises = d.exercises.filter((x) => x.id !== ex.id); })}>✕</button>
+                      onClick={() => update((d) => { removeEx(d, day, ex.id); })}>✕</button>
                   </Row>
                 </>
               )}
@@ -2507,7 +2546,7 @@ function ManageView({ data, update, reseed, restore }) {
               const name = (newNames[day] || "").trim();
               if (!name) return;
               update((d) => {
-                d.exercises.push({
+                mutListFor(d, day).push({
                   id: slug(`${day}-${Date.now()}-${name}`),
                   day, name, prev: null, targetSets: 3,
                   variants: [{ id: "main", name: "Usual machine" }],
