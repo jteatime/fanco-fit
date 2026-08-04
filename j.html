@@ -1276,7 +1276,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
       });
       let best = null;
       data.exercises.forEach((ex) => {
-        const h = historyFor(data, ex.id).filter((x) => weekOfCycle(data, x.date) >= 0);
+        const h = historyFor(data, ex.id).filter((x) => weekOfCycle(data, x.date) >= 0 && !isDeloadSess(data, x));
         if (h.length >= 2) {
           const v0 = volumeOf(h[0].entry.sets), v1 = volumeOf(h[h.length - 1].entry.sets);
           if (v0 > 0) {
@@ -1461,6 +1461,8 @@ function currentStreak(data) {
     if (daySessionIn(data, sl.day, sl.week)) { n++; continue; }
     if (sl.date === todayISO()) continue;
     if (OPTIONAL_DAYS[sl.day]) continue;
+    /* A deload day the user deliberately emptied is planned rest, not a miss */
+    if (isDeloadWeek(data, sl.week) && exListFor(data, sl.day, sl.week).length === 0) continue;
     break;
   }
   return n;
@@ -1528,7 +1530,7 @@ function LineChart({ points, color, fmt, showValues, onSelect }) {
         <path d={areaPath} fill={`url(#${gid})`} />
         <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {points.map((p, i) => {
-          const show = i === points.length - 1 || i % step === 0;
+          const show = p.deload || i === points.length - 1 || i % step === 0;
           return show
             ? <text key={`t${i}`} x={x(i)} y={H - 6} fontSize="9" fill={T.faint} textAnchor="middle">{p.short}</text>
             : null;
@@ -2504,7 +2506,7 @@ function ManageView({ data, update, reseed, restore }) {
             })}
           </Row>
           <div style={{ color: T.faint, fontSize: 12, marginTop: 6 }}>
-            Lighter recovery weeks. Kept out of volume totals, records, streaks and rep targets.
+            Lighter recovery weeks. Kept out of volume totals, records and rep targets.
           </div>
         </div>
         <div style={{ color: T.muted, fontSize: 13, marginBottom: 10 }}>
