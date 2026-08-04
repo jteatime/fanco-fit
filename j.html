@@ -667,7 +667,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
   /* The array this card's exercise actually lives in. Deload plan entries
      keep the program's ids, so writing to d.exercises during a deload week
      would mutate the real program instead of the plan. */
-  const exHome = (d) => (isDeload ? ((d.deloadPlan || {})[ex.day] || []) : d.exercises);
+  const exHome = (d) => (isDeload ? ((d.deloadPlan || {})[ex.day] || d.exercises) : d.exercises);
   const [open, setOpen] = useState(false);
   const [addingMachine, setAddingMachine] = useState(false);
   const [machineName, setMachineName] = useState("");
@@ -745,7 +745,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
   const exComplete = skippedAll || plannedFilled >= exTotal;
   const todayVol = scoreOf(todaySets);
   const lastVol = lastSame ? scoreOf(lastSame.entry.sets) : 0;
-  const liveDelta = exComplete && !skippedAll && lastSame ? pct(lastVol, todayVol) : null;
+  const liveDelta = !isDeload && exComplete && !skippedAll && lastSame ? pct(lastVol, todayVol) : null;
   const beating = exComplete && liveDelta !== null && liveDelta > 0;
   const stripColor = !exComplete
     ? T.line
