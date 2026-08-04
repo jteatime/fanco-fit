@@ -254,6 +254,8 @@ function buildSeed() {
     bwUnit: "lb",
     sentNotes: [],
     noteAcks: {},
+    deloadWeeks: [],
+    deloadPlan: {},
     cycleNumber: 2,
     cycleName: "Cycle 2",
     cycleWeeks: 8,
@@ -366,6 +368,37 @@ const addDays = (iso, n) => {
 };
 const weekOfCycle = (data, iso) =>
   Math.floor((new Date(iso + "T12:00:00") - new Date(data.cycleStart + "T12:00:00")) / (7 * 864e5));
+/* ---- Deload weeks -------------------------------------------------
+   A deload is a planned lighter recovery week. Its sessions are logged
+   normally but must never enter a volume comparison: no rep targets, no
+   green/red, no star, no record, and no contribution to cycle totals. */
+const isDeloadWeek = (data, w) => (data.deloadWeeks || []).includes(w);
+const isDeloadSess = (data, s) => isDeloadWeek(data, weekOfCycle(data, s.date));
+
+/* The exercise list for a day in a given week — the deload plan replaces
+   the normal program entirely during a deload week. */
+const exListFor = (data, day, w) =>
+  isDeloadWeek(data, w)
+    ? ((data.deloadPlan || {})[day] || [])
+    : data.exercises.filter((e) => e.day === day);
+
+/* Copy the current program into the deload plan at half the planned sets.
+   Runs once per day; a day already in the plan is never overwritten.
+   Copied exercises keep their original id so lastEntryFor can still find
+   the matching heavy-week history for the reference line. */
+function seedDeloadPlan(d) {
+  d.deloadPlan = d.deloadPlan || {};
+  for (const day of DAYS) {
+    if (d.deloadPlan[day]) continue;
+    d.deloadPlan[day] = d.exercises
+      .filter((e) => e.day === day)
+      .map((e) => ({
+        ...e,
+        targetSets: Math.max(1, Math.ceil((e.targetSets || 3) / 2)),
+        variants: e.variants.map((v) => ({ ...v })),
+      }));
+  }
+}
 function cellDateFor(cycleStart, w, day) {
   for (let i = 0; i < 7; i++) {
     const iso = addDays(cycleStart, w * 7 + i);
@@ -2158,6 +2191,8 @@ function ManageView({ data, update, reseed, restore }) {
       d.cycleNumber += 1;
       d.cycleName = `Cycle ${d.cycleNumber}`;
       d.cycleStart = todayISO();
+      /* Deload plan carries over; flagged weeks are clipped to the new length */
+      d.deloadWeeks = (d.deloadWeeks || []).filter((w) => w < (d.cycleWeeks || 8));
     });
 
   return (
@@ -2860,6 +2895,8 @@ function App() {
           if (!parsed.bwUnit) parsed.bwUnit = "lb";
           if (!parsed.sentNotes) parsed.sentNotes = [];
           if (!parsed.noteAcks) parsed.noteAcks = {};
+          if (!parsed.deloadWeeks) parsed.deloadWeeks = [];
+          if (!parsed.deloadPlan) parsed.deloadPlan = {};
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
           bootNotes(parsed);
