@@ -418,6 +418,20 @@ const exListFor = (data, day, w) => {
   return plan || data.exercises.filter((e) => e.day === day);
 };
 
+/* Program + deload-only exercises, deduped by id. Session entries are keyed
+   by exercise id, so anything that renders a logged session needs the union —
+   a deload-only movement belongs to no program day. */
+function allKnownExercises(data) {
+  const out = data.exercises.slice();
+  const seen = new Set(out.map((x) => x.id));
+  for (const list of Object.values(data.deloadPlan || {})) {
+    for (const de of list || []) {
+      if (!seen.has(de.id)) { seen.add(de.id); out.push(de); }
+    }
+  }
+  return out;
+}
+
 /* Copy the current program into the deload plan at half the planned sets.
    Runs once per day; a day already in the plan is never overwritten.
    Copied exercises keep their original id so lastEntryFor can still find
@@ -1326,23 +1340,30 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
     if (sess) {
       const wNow = weekOfCycle(data, sess.date);
       let prevDay = null;
-      for (let k = wNow - 1; k >= 0; k--) { const p = daySessionIn(data, day, k); if (p) { prevDay = p; break; } }
-      record = !!(prevDay && dayVolume(sess) > dayVolume(prevDay));
+      for (let k = wNow - 1; k >= 0; k--) {
+        if (isDeloadWeek(data, k)) continue;
+        const p = daySessionIn(data, day, k); if (p) { prevDay = p; break; }
+      }
+      record = !isDeloadWeek(data, wNow) && !!(prevDay && dayVolume(sess) > dayVolume(prevDay));
     }
 
     /* Cycle finale: this finish closes out the final week's schedule */
     let finale = null;
     const finalW = (data.cycleWeeks || 8) - 1;
     if (wIdx === finalW && DAYS.every((dd) => OPTIONAL_DAYS[dd] || dd === day || daySessionIn(data, dd, wIdx))) {
-      const inCycle = sortedSessions(data).filter((x) => weekOfCycle(data, x.date) >= 0);
+      const inCycle = sortedSessions(data).filter((x) => weekOfCycle(data, x.date) >= 0 && !isDeloadSess(data, x));
       const vol = inCycle.reduce((a, x) => a + dayVolume(x), 0);
       let wins = 0;
       DAYS.forEach((dd) => {
         for (let wi = 0; wi <= finalW; wi++) {
+          if (isDeloadWeek(data, wi)) continue;
           const sx = daySessionIn(data, dd, wi);
           if (!sx) continue;
           let pv = null;
-          for (let k = wi - 1; k >= 0; k--) { const p = daySessionIn(data, dd, k); if (p) { pv = p; break; } }
+          for (let k = wi - 1; k >= 0; k--) {
+            if (isDeloadWeek(data, k)) continue;
+            const p = daySessionIn(data, dd, k); if (p) { pv = p; break; }
+          }
           if (pv && dayVolume(sx) > dayVolume(pv)) wins += 1;
         }
       });
@@ -1605,14 +1626,17 @@ function LineChart({ points, color, fmt, showValues, onSelect }) {
             ? <text key={`t${i}`} x={x(i)} y={H - 6} fontSize="9" fill={T.faint} textAnchor="middle">{p.short}</text>
             : null;
         })}
-        {points.map((p, i) => (
-          <g key={`p${i}`}>
-            <circle cx={x(i)} cy={y(p.value)} r="12" fill="transparent" style={{ cursor: "pointer" }} onClick={() => { setSel(i); if (onSelect) onSelect(p, i); }} />
-            {i === sel
-              ? <circle cx={x(i)} cy={y(p.value)} r="4.5" fill={color} />
-              : <circle cx={x(i)} cy={y(p.value)} r="2.8" fill={T.bg} stroke={color} strokeWidth="1.5" />}
-          </g>
-        ))}
+        {points.map((p, i) => {
+          const c = p.deload ? T.muted : color;
+          return (
+            <g key={`p${i}`}>
+              <circle cx={x(i)} cy={y(p.value)} r="12" fill="transparent" style={{ cursor: "pointer" }} onClick={() => { setSel(i); if (onSelect) onSelect(p, i); }} />
+              {i === sel
+                ? <circle cx={x(i)} cy={y(p.value)} r="4.5" fill={c} />
+                : <circle cx={x(i)} cy={y(p.value)} r="2.8" fill={T.bg} stroke={c} strokeWidth="1.5" />}
+            </g>
+          );
+        })}
         {showValues && points.map((p, i) => {
           const shown = i % vStep === 0 || i === points.length - 1 || i === activeIdx;
           if (!shown) return null;
@@ -1634,7 +1658,7 @@ function StatStrip({ data }) {
   let wins = 0;
   DAYS.forEach((d) => {
     const list = sortedSessions(data).filter(
-      (s) => s.day === d && weekOfCycle(data, s.date) >= 0 && Object.values(s.entries).some(entryHasData)
+      (s) => s.day === d && weekOfCycle(data, s.date) >= 0 && !isDeloadSess(data, s) && Object.values(s.entries).some(entryHasData)
     );
     for (let i = 1; i < list.length; i++) {
       if (dayVolume(list[i]) > dayVolume(list[i - 1])) wins += 1;
@@ -1704,9 +1728,21 @@ function TrendCard({ data, update, day }) {
     const pts = scope === "all"
       ? weeks.map((w) => {
           const list = byWeek[w];
-          return { label: `Week ${w + 1}`, short: `W${w + 1}`, value: list.reduce((a, s) => a + dayVolume(s), 0), sub: `${list.length} sessions` };
+          const dl = isDeloadWeek(data, w);
+          return {
+            label: `Week ${w + 1}${dl ? " · deload" : ""}`,
+            short: dl ? `☾${w + 1}` : `W${w + 1}`,
+            value: list.reduce((a, s) => a + dayVolume(s), 0),
+            sub: `${list.length} sessions`,
+            deload: dl,
+          };
         })
-      : scoped.map((s) => ({ label: `${s.day} · ${fmtDate(s.date)}`, short: domShort(s.date), value: dayVolume(s) }));
+      : scoped.map((s) => ({
+          label: `${s.day} · ${fmtDate(s.date)}${isDeloadSess(data, s) ? " · deload" : ""}`,
+          short: domShort(s.date),
+          value: dayVolume(s),
+          deload: isDeloadSess(data, s),
+        }));
     chart = { points: pts, color: T.pos, fmt: fmtVol };
   }
 
@@ -2013,13 +2049,13 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
             </div>
           )}
         </div>
-        {data.exercises.filter((ex) => sess.entries[ex.id]).map((ex) => {
+        {allKnownExercises(data).filter((ex) => sess.entries[ex.id]).map((ex) => {
           const e = sess.entries[ex.id];
           if (!entryHasData(e)) return null;
           const vName = (ex.variants.find((v) => v.id === e.variantId) || {}).name || "";
           const evol = scoreOf(e.sets);
           const prevSame = lastEntryFor(data, ex.id, e.variantId, openDayKey, sess.date);
-          const exDelta = prevSame ? pct(scoreOf(prevSame.entry.sets), evol) : null;
+          const exDelta = prevSame && !isDeloadSess(data, sess) ? pct(scoreOf(prevSame.entry.sets), evol) : null;
           const won = exDelta !== null && exDelta > 0;
           const exStrip = won ? T.pos : exDelta !== null && exDelta < 0 ? T.neg : T.amber;
           return (
