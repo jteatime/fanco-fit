@@ -95,7 +95,9 @@ Line numbers are `index.html`; `j.html` differs by ~100 lines.
 | 1282 | `fireCelebration` record check | prev-week walk-back skips deload weeks; `record = false` outright in a deload week |
 | 1288 | finale recap | deload sessions dropped from the `inCycle` volume total; the wins loop skips deload weeks |
 | 1587 | `StatStrip` wins | deload sessions filtered out before the pairwise volume compare |
-| 1626 | `TrendCard` | deload weeks **kept** as chart points, tagged `deload: true` → muted bar + ☾; excluded from any cycle sum. Applies to both `scope: "all"` (week bars) and `scope: "day"` (per-session points) |
+| 1626 | `TrendCard` | deload weeks **kept** as chart points, tagged `deload: true` → muted dot + `☾` axis label; excluded from any cycle sum. Applies to both `scope: "all"` (weekly points) and `scope: "day"` (per-session points) |
+| 1499 | `LineChart` | a point with `deload: true` draws its dot in `T.muted` instead of the series color. Shared with the bodyweight and duration charts, which never set the field |
+| 855, 868, 890 | `ExerciseCard` variant controls | must mutate `deloadPlan[day]` rather than `d.exercises` during a deload week — plan entries keep the program's ids, so writing to `d.exercises` would silently edit the real program |
 | 1799 | `CycleGrid` | deload rows get a ☾ row label and the moon glyph per cell |
 | 447 | `buildSheetRows` | deload weeks export with a `Week 5 (deload)` header; per-day rows union in `deloadPlan[day]` so deload-only movements are not silently dropped from the CSV |
 | 1177 | `TodayView` | `exList` → `exListFor(data, day, wIdx)` |
@@ -170,9 +172,13 @@ Cycle 2 · Week 4 · ☾ deload · today
 - Header gains a `· ☾ deload` segment.
 - `ExerciseCard` keeps its existing "last time" line, now sourced from the last
   *non-deload* session (free, via the `lastEntryFor` change).
-- `SetRow` receives `compareSet = null` in a deload week → no `target` placeholder, no
+- `SetRow` receives `compareSet = undefined` in a deload week → no `target` placeholder, no
   green/red. Placeholders fall back to the program `repGoal`.
-- A muted moon rail on the card edge marks the week, in the spirit of `RAINBOW_CSS`.
+
+An earlier draft also called for a muted moon rail on each card's edge. **Dropped** — the
+week is already marked in the Today header, the day pills, the heatmap and the chart, so a
+fourth decorative marker inside every card is noise, and it would mean editing the shared
+`.ll-card` root for cosmetics alone.
 
 ### Day pills & heatmap
 
