@@ -567,10 +567,14 @@ function dayWeekStatus(data, d, wArg) {
   const w = wArg !== undefined ? wArg : Math.max(0, weekOfCycle(data, today));
   const sess = daySessionIn(data, d, w);
   if (sess) {
+    if (isDeloadWeek(data, w)) return "deload";
     const finished = sess.celebrated || sess.date < today;
     if (!finished) return "logged";
     let prev = null;
-    for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
+    for (let i = w - 1; i >= 0; i--) {
+      if (isDeloadWeek(data, i)) continue;
+      const p = daySessionIn(data, d, i); if (p) { prev = p; break; }
+    }
     const dv = dayVolume(sess);
     const pv = prev ? dayVolume(prev) : null;
     return pv !== null && dv > pv ? "star" : pv !== null && dv < pv ? "down" : "logged";
@@ -584,6 +588,7 @@ function dayWeekStatus(data, d, wArg) {
 function DayStatusIcon({ status, size = 8, data }) {
   if (status === "star") return <RewardGlyph data={data} size={size + 5} />;
   if (status === "missed") return <span style={{ color: T.faint, fontSize: size + 2, lineHeight: 1, flex: "none" }}>✕</span>;
+  if (status === "deload") return <span style={{ color: T.muted, fontSize: size + 3, lineHeight: 1, flex: "none", opacity: 0.85 }}>☾</span>;
   const st = { width: size, height: size, borderRadius: size, flex: "none", display: "inline-block" };
   if (status === "down") return <span style={{ ...st, background: T.neg }} />;
   if (status === "logged") return <span style={{ ...st, background: T.pos }} />;
@@ -1756,11 +1761,16 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                 let onClick;
                 if (sess) {
                   let prev = null;
-                  for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
+                  for (let i = w - 1; i >= 0; i--) {
+                    if (isDeloadWeek(data, i)) continue;
+                    const p = daySessionIn(data, d, i); if (p) { prev = p; break; }
+                  }
                   const dv = dayVolume(sess);
                   const pv = prev ? dayVolume(prev) : null;
                   const finishedCell = sess.celebrated || sess.date < today;
-                  if (!finishedCell) {
+                  if (isDeloadWeek(data, w)) {
+                    content = <span style={{ color: T.muted, fontSize: 12, opacity: 0.85 }}>☾</span>;
+                  } else if (!finishedCell) {
                     content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.pos, display: "inline-block" }} />;
                   } else if (pv !== null && dv > pv) {
                     content = rw.char;
