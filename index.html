@@ -493,15 +493,25 @@ const weeksBetween = (startIso, endIso) => {
 /* Every cycle as a self-contained view, oldest first, live cycle last.
    An archived view has a hard `end`; the live one has end === null. */
 function cycleViews(data) {
-  const out = (data.cycleHistory || []).map((c) => ({
-    number: c.number,
-    name: c.name || `Cycle ${c.number}`,
-    start: c.start,
-    end: c.end,
-    weeks: c.weeks || weeksBetween(c.start, c.end),
-    deloadWeeks: c.deloadWeeks || [],
-    isCurrent: false,
-  }));
+  const out = (data.cycleHistory || []).map((c) => {
+    const v = {
+      number: c.number,
+      name: c.name || `Cycle ${c.number}`,
+      start: c.start,
+      end: c.end,
+      weeks: c.weeks || weeksBetween(c.start, c.end),
+      deloadWeeks: c.deloadWeeks || [],
+      isCurrent: false,
+    };
+    /* A finished cycle's grid stops at the last week that actually holds a
+       session. Rolling over a few days late otherwise left trailing empty
+       columns. Clamp only — never widen — and leave a cycle with nothing
+       logged at its recorded length. Derived, not stored, so history
+       already written out gets tidied too. */
+    const last = lastLoggedWeekIn(data, v);
+    if (last >= 0) v.weeks = Math.min(v.weeks, last + 1);
+    return v;
+  });
   out.push({
     number: data.cycleNumber,
     name: data.cycleName || `Cycle ${data.cycleNumber}`,
@@ -519,6 +529,18 @@ const weekIn = (view, iso) =>
 const inView = (view, iso) => iso >= view.start && (!view.end || iso <= view.end);
 const isDeloadWeekIn = (view, w) => (view.deloadWeeks || []).includes(w);
 const viewFor = (views, iso) => views.find((v) => inView(v, iso)) || null;
+
+/* Highest week index inside `view` holding a session with real data, or
+   -1 when the cycle is empty. */
+function lastLoggedWeekIn(data, view) {
+  let w = -1;
+  for (const s of sortedSessions(data)) {
+    if (!inView(view, s.date)) continue;
+    if (!Object.values(s.entries).some(entryHasData)) continue;
+    w = Math.max(w, weekIn(view, s.date));
+  }
+  return w;
+}
 
 /* exListFor, scoped to any cycle rather than only the live one. */
 const exListForView = (data, view, day, w) => {
@@ -578,7 +600,7 @@ function migrateCycleHistory(d) {
     name: `Cycle ${n}`,
     start,
     end,
-    weeks: Math.max(weeksBetween(start, end), weekIn(probe, dates[dates.length - 1]) + 1),
+    weeks: weeksBetween(start, end),
     deloadWeeks: deloadWeeks.sort((a, b) => a - b),
   });
   return d;
