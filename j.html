@@ -1317,6 +1317,194 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Superset card (Today view) — round-interleaved                      */
+/* ------------------------------------------------------------------ */
+/* One card for a whole group. Each round block holds one SetRow per
+   member at that round's index, in the order you actually perform them.
+   Every member keeps its own session entry, so comparisons stay per
+   exercise per machine — nothing here merges volume.
+   `initialOpen` exists so tests can render the open state. */
+function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, initialOpen }) {
+  const [open, setOpen] = useState(!!initialOpen);
+  const [detail, setDetail] = useState(null); /* member id whose extras are shown */
+  const members = group.members;
+  const rounds = group.rounds;
+  /* One entry controller per member, in render order. */
+  const ctl = members.map((m) => useExerciseEntry(data, update, m, sessionKey, isDeload));
+
+  /* Baked-in sets: opening the card lays out (and heals) every member's
+     planned set count, mirroring ExerciseCard. */
+  useEffect(() => {
+    if (!open) return;
+    update((d) => {
+      members.forEach((m, i) => {
+        const e = ctl[i].ensureEntry(d);
+        const nonExtra = e.sets.filter((s) => !s.extra);
+        const extras = e.sets.filter((s) => s.extra);
+        while (nonExtra.length < rounds) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
+        e.sets = [...nonExtra, ...extras];
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, rounds]);
+
+  const roundDone = (r) => members.every((m, i) => {
+    const s = ctl[i].plannedToday[r];
+    return s && (num(s.r) > 0 || s.skipped);
+  });
+  const nowRound = (() => {
+    for (let r = 0; r < rounds; r++) if (!roundDone(r)) return r;
+    return -1;
+  })();
+  const allDone = members.every((_, i) => ctl[i].exComplete);
+  const anyBeating = members.some((_, i) => ctl[i].beating);
+  const anyDown = members.some((_, i) => ctl[i].liveDelta !== null && ctl[i].liveDelta < 0);
+  const groupStrip = !allDone ? T.line : anyBeating && !anyDown ? T.pos : anyDown ? T.neg : T.amber;
+
+  return (
+    <div className="ll-card" style={{ position: "relative", border: `1px solid ${T.line}` }}>
+      {/* header */}
+      <div onClick={() => setOpen(!open)} style={{ padding: "13px 14px", cursor: "pointer" }}>
+        <Row style={{ justifyContent: "space-between" }}>
+          <Row style={{ gap: 9, minWidth: 0 }}>
+            <span style={{ width: 4, alignSelf: "stretch", minHeight: 20, borderRadius: 2, background: groupStrip, flex: "none", transition: "background-color 0.5s ease" }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: T.muted, marginBottom: 2 }}>
+                🔗 Superset · {rounds} rounds
+              </div>
+              <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>
+                {members.map((m) => m.name).join(" + ")}
+              </div>
+            </div>
+          </Row>
+          <Row style={{ gap: 8, flex: "none" }}>
+            <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>
+              {members.reduce((a, _, i) => a + ctl[i].exFilled, 0)}/{members.reduce((a, _, i) => a + ctl[i].exTotal, 0)}
+            </span>
+            <span style={{ color: T.faint, fontSize: 13 }}>{open ? "▾" : "▸"}</span>
+          </Row>
+        </Row>
+        {/* per-member summary stays visible collapsed — a superset is still
+            two exercises with their own histories */}
+        <div style={{ marginTop: 7, marginLeft: 13 }}>
+          {members.map((m, i) => (
+            <Row key={m.id} style={{ justifyContent: "space-between", marginTop: 3 }}>
+              <span style={{ color: T.muted, fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {m.icon ? m.icon + " " : ""}{m.name}
+                {ctl[i].lastSame ? <span style={{ color: T.faint }}> · last {setsLine(ctl[i].lastSame.entry.sets)}</span> : null}
+              </span>
+              <Row style={{ gap: 7, flex: "none" }}>
+                <span className="ll-num" style={{ color: T.faint, fontSize: 11.5 }}>{ctl[i].exFilled}/{ctl[i].exTotal}</span>
+                {!data.hideDeltas && ctl[i].exComplete && ctl[i].liveDelta !== null && <Delta value={ctl[i].liveDelta} />}
+              </Row>
+            </Row>
+          ))}
+        </div>
+      </div>
+
+      {open && (
+        <div className="ll-fade" style={{ padding: "0 14px 14px", borderTop: `1px solid ${T.line}` }}>
+          <Row style={{ justifyContent: "center", gap: 6, margin: "10px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
+            <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+          </Row>
+
+          {/* rounds */}
+          {Array.from({ length: rounds }, (_, r) => (
+            <div key={r} style={{ borderTop: r === 0 ? "none" : `1px dashed ${T.line}`, paddingTop: r === 0 ? 0 : 9, marginBottom: 6 }}>
+              <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6, color: r === nowRound ? T.blue : T.faint, fontWeight: r === nowRound ? 700 : 400 }}>
+                Round {r + 1}{roundDone(r) ? " ✓" : r === nowRound ? " — now" : ""}
+              </div>
+              {members.map((m, i) => {
+                const s = ctl[i].todaySets.filter((x) => !x.extra)[r];
+                if (!s) return null;
+                const absIdx = ctl[i].todaySets.indexOf(s);
+                return (
+                  <div key={m.id} style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9, marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
+                      {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
+                    </div>
+                    <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal}
+                      compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
+                      onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
+                      onRemove={() => ctl[i].removeSetAt(absIdx)} />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {/* extras sit outside the planned rounds, so they render as solo tails */}
+          {members.map((m, i) => ctl[i].todaySets.map((s, absIdx) => (s.extra ? (
+            <div key={`${m.id}-x-${absIdx}`} style={{ borderTop: `1px dashed ${T.line}`, paddingTop: 9, marginBottom: 6 }}>
+              <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.07em", color: T.amber, marginBottom: 6 }}>
+                Extra · {m.name} only
+              </div>
+              <div style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9 }}>
+                <SetRow idx={absIdx} set={s} unit={data.unit} repGoal={m.repGoal} compareSet={undefined}
+                  onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
+                  onRemove={() => ctl[i].removeSetAt(absIdx)} />
+              </div>
+            </div>
+          ) : null)))}
+
+          {/* per-member extras behind a disclosure each */}
+          <Row style={{ gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+            {members.map((m) => (
+              <button key={m.id} className="ll-btn ll-btn-sm"
+                onClick={() => setDetail(detail === m.id ? null : m.id)}
+                aria-expanded={detail === m.id}>
+                {m.name} ⋯
+              </button>
+            ))}
+          </Row>
+
+          {members.map((m, i) => (detail === m.id ? (
+            <div key={`d-${m.id}`} className="ll-fade" style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", marginTop: 9 }}>
+              <div style={{ color: T.muted, fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 7 }}>
+                {m.name}
+              </div>
+              {ctl[i].lastSame ? (
+                <div className="ll-num" style={{ fontSize: 14.5, marginBottom: 8 }}>
+                  Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets)}
+                </div>
+              ) : (
+                <div style={{ color: T.faint, fontSize: 12.5, marginBottom: 8 }}>
+                  No history on {ctl[i].variant.name}.
+                </div>
+              )}
+              {/* machine picker */}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 9 }}>
+                {m.variants.map((v, vi) => (
+                  <button key={v.id} className={`ll-chip ${v.id === ctl[i].variantId ? "on" : ""}`}
+                    onClick={() => update((d) => {
+                      const dex = ctl[i].exHome(d).find((x) => x.id === m.id);
+                      dex.activeVariant = v.id;
+                      const s = d.sessions[sessionKey];
+                      if (s && s.entries[m.id]) s.entries[m.id].variantId = v.id;
+                    })}>
+                    <VariantDot index={vi} /> {v.name}
+                  </button>
+                ))}
+              </div>
+              <Row style={{ gap: 6, flexWrap: "wrap" }}>
+                <button className="ll-btn ll-btn-sm" onClick={ctl[i].addExtraSet}>+ Extra set</button>
+                <button className="ll-btn ll-btn-sm" style={{ color: T.muted }}
+                  onClick={() => ctl[i].setSkipAll(!ctl[i].skippedAll)}>
+                  {ctl[i].skippedAll ? "Undo skip" : "Skip all sets"}
+                </button>
+              </Row>
+              <input className="ll-input" style={{ marginTop: 9, fontSize: 13 }}
+                placeholder={`Note for ${m.name}…`} value={(ctl[i].entry && ctl[i].entry.note) || ""}
+                onChange={(e) => update((d) => { ctl[i].ensureEntry(d).note = e.target.value; })} />
+            </div>
+          ) : null))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Celebrations — fires when the day's last exercise gets logged       */
 /* ------------------------------------------------------------------ */
 const CELEBRATIONS = [
@@ -1692,9 +1880,11 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
           ▶ Start Workout
         </button>
       )}
-      {exList.map((ex) => (
-        <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
-      ))}
+      {groupedExercises(exList).map((g) => (g.kind === "superset" ? (
+        <SupersetCard key={g.id} data={data} update={update} group={g} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
+      ) : (
+        <ExerciseCard key={g.ex.id} data={data} update={update} ex={g.ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
+      )))}
       {exList.length > 0 && weekOffset === 0 && (() => {
         const done = !!(sess && sess.celebrated);
         const ready = complete && !done;
