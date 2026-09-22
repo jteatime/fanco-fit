@@ -1072,6 +1072,11 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
   }, [open, rounds]);
 
   const roundDone = (r) => members.every((m, i) => {
+    /* A member skipped wholesale is done for every round — setSkipAll marks
+       the entry, never the individual sets, and ExerciseCard compensates the
+       same way via `exComplete = skippedAll || ...`. Without this a skipped
+       member wedges nowRound at 0 forever. */
+    if (ctl[i].skippedAll) return true;
     const s = ctl[i].plannedToday[r];
     return s && (num(s.r) > 0 || s.skipped);
   });
@@ -1138,6 +1143,19 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                 Round {r + 1}{roundDone(r) ? " ✓" : r === nowRound ? " — now" : ""}
               </div>
               {members.map((m, i) => {
+                /* A wholesale-skipped member gets a dimmed marker, not an
+                   editable row that looks like an unlogged set. Undo lives in
+                   that member's ⋯ panel. */
+                if (ctl[i].skippedAll) {
+                  return (
+                    <div key={m.id} style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9, marginBottom: 4, opacity: 0.5 }}>
+                      <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
+                        {m.icon ? m.icon + " " : ""}{m.name}
+                      </div>
+                      <div style={{ fontSize: 13, color: T.faint }}>— skipped today</div>
+                    </div>
+                  );
+                }
                 const s = ctl[i].todaySets.filter((x) => !x.extra)[r];
                 if (!s) return null;
                 const absIdx = ctl[i].todaySets.indexOf(s);
