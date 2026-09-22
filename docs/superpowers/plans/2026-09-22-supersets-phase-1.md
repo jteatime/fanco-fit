@@ -280,7 +280,7 @@ function groupedExercises(list) {
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `node test/superset-logic.test.js`
-Expected: PASS — `20 passed, 0 failed` (10 assertions × 2 files).
+Expected: PASS — `0 failed`. Record the actual assertion count in your report; the gate is zero failures, not a specific total.
 
 - [ ] **Step 6: Verify both files still compile**
 
@@ -504,7 +504,7 @@ function moveExerciseGroup(list, day, key, dir) {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `node test/superset-logic.test.js`
-Expected: PASS — `62 passed, 0 failed` (31 assertions × 2 files).
+Expected: PASS — `0 failed`, with a higher total than Task 1's. Record the actual count in your report; the gate is zero failures.
 
 - [ ] **Step 5: Verify both files still compile**
 
@@ -990,7 +990,15 @@ for (const file of ["index.html", "j.html"]) {
   ok("names both members in the title", /Leg Press/.test(m) && /Leg Curl/.test(m));
   ok("shows the superset tag", /SUPERSET/i.test(m));
   ok("shows the round count", /3\s*ROUNDS/i.test(m));
-  ok("does not use amber as the superset accent", !/#E3A93C/i.test(m.split("SUPERSET")[0]));
+  /* Golden Rule 4: amber means tie/no-comparison, so it must not be doing
+     structural work. The tag is T.muted and the group border is T.line.
+     (The card renders "Superset" in markup — the caps are CSS only.) */
+  ok("superset tag uses the muted colour, not amber",
+     new RegExp(`color:\\s*${M.T.muted}[^"]*"[^>]*>[^<]*Superset`, "i").test(m) ||
+     /Superset/.test(m) && !new RegExp(M.T.amber, "i").test(m.slice(0, m.indexOf("Superset"))),
+     `-> tag region`);
+  ok("collapsed card introduces no amber chrome", !new RegExp(M.T.amber, "i").test(m),
+     `-> amber present: ${new RegExp(M.T.amber, "i").test(m)}`);
 
   /* collapsed by default, like ExerciseCard */
   ok("collapsed card has no set inputs", !/aria-label="reps"/.test(m));
@@ -1507,8 +1515,9 @@ Then render the day's list as:
                     ))}
                   </div>
                 ) : (
-                  /* unchanged single-exercise row — keep the existing markup */
-                  <SingleExerciseRow ex={g.ex} day={day} />
+                  /* unchanged single-exercise row — see the note below: this is
+                     a plain function call, NOT a nested component */
+                  singleExerciseRow(g.ex, day, gi, garr)
                 )}
               </div>
             );
@@ -1523,10 +1532,24 @@ already handles the deload-vs-normal split. Do not introduce a new one.
 
 The existing single-exercise row markup (the `<Row key={ex.id}>` block with the
 icon/name inputs, the planned-sets stepper and `↑ ↓ ✎ ✕`) must be preserved
-exactly. Lift it verbatim into a local `SingleExerciseRow({ ex, day })`
-component declared inside `ManageView`, where it closes over `editing`,
-`setEditing`, `editText`, `setEditText`, `update`, `mutListFor`, `findEx` and
-`removeEx`. Do not retype the markup — cut and paste it.
+exactly. Move it verbatim into a **plain function** declared inside
+`ManageView`:
+
+```javascript
+  /* Deliberately a function that returns JSX, NOT a nested component. A
+     component declared during render gets a fresh identity every render, so
+     React would unmount and remount this subtree on each keystroke and the
+     name field's autoFocus would steal the caret mid-edit. A direct call has
+     no component boundary and no remount. */
+  const singleExerciseRow = (ex, day, gi, garr) => (
+    /* ...the existing <Row key={ex.id}> block, unchanged except for the two
+       edits listed below... */
+  );
+```
+
+It closes over `editing`, `setEditing`, `editText`, `setEditText`, `update`,
+`mutListFor`, `findEx` and `removeEx`. Do not retype the markup — cut and paste
+it, and call it as `singleExerciseRow(g.ex, day, gi, garr)`.
 
 Two changes inside that lifted markup, and nothing else:
 
@@ -1542,12 +1565,13 @@ Two changes inside that lifted markup, and nothing else:
                        onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, ex.id, 1); })}>↓</button>
    ```
 
-   This needs `gi` and `garr.length` from the grouped map, so pass them in:
-   `<SingleExerciseRow ex={g.ex} day={day} gi={gi} garr={garr} />` and take
-   `{ ex, day, gi, garr }` as its props.
+   `gi` and `garr` come in as the third and fourth arguments of
+   `singleExerciseRow`, supplied by the grouped map — note these are now
+   **group** indices, so the disabled/opacity states correctly describe whether
+   a whole group can move, not an array element.
 
 2. Nothing else in the row changes. The planned-sets stepper stays as-is; a
-   grouped exercise never renders through this component, so its stepper can
+   grouped exercise never renders through this function, so its stepper can
    never fight the group's rounds stepper.
 
 - [ ] **Step 4: Run the UI test to verify it passes**
