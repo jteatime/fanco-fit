@@ -145,6 +145,24 @@ const blob = {
      `-> ${e.press.sets.length}/${e.curl.sets.length}`);
   ok("round 1 marks complete", /Round 1[\s\S]{0,40}✓/i.test(await txt()));
 
+  /* ---- Manage: ✎ inside the group block actually edits a member ---- */
+  ok("Manage reopens for the edit check", await clickText("Manage")); await wait(700);
+  ok("clicked ✎ on a grouped member", await clickText("✎"));
+  const editInputPresent = await page.evaluate(() =>
+    [...document.querySelectorAll("input.ll-input")].some((i) => i.value === "Leg Press"));
+  ok("an input carrying that member's name appears", editInputPresent);
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const el = [...document.querySelectorAll("input.ll-input")].find((i) => i.value === "Leg Press");
+    setter.call(el, "Leg Press Machine");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  ok("clicked Done", await clickText("Done"));
+  d = await storedUntil((d) => d.exercises.some((x) => x.id === "press" && x.name === "Leg Press Machine"));
+  ok("rename persisted to storage",
+     d.exercises.some((x) => x.id === "press" && x.name === "Leg Press Machine"),
+     `-> ${d.exercises.map((x) => x.name).join()}`);
+
   /* ---- Manage: unlink ---- */
   ok("Manage reopens", await clickText("Manage")); await wait(700);
   ok("unlink control present", await clickText("unlink"));

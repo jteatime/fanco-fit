@@ -1,3 +1,5 @@
 .worktrees
 .superpowers
 test/node_modules/
+test/*.ss.js
+test/*.ss.jsx

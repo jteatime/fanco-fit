@@ -965,8 +965,14 @@ function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
 /* Everything an exercise's log entry needs, independent of how it is laid
    out. ExerciseCard renders one of these; SupersetCard renders one per
    member of a group. Lifted wholesale out of ExerciseCard — the logic is
-   unchanged, it just has two callers now. */
-function useExerciseEntry(data, update, ex, sessionKey, isDeload) {
+   unchanged, it just has two callers now.
+
+   NOT a hook, despite what it derives — it deliberately contains NO useState/
+   useEffect/useRef/useMemo, which is the only reason SupersetCard can call it
+   once per member inside members.map(). Adding a hook here would produce a
+   variable-length hook list under a stable React key and crash the card.
+   Keep it hook-free. */
+function exerciseEntry(data, update, ex, sessionKey, isDeload) {
   /* The array this exercise actually lives in. Deload plan entries keep the
      program's ids, so writing to d.exercises during a deload week would
      mutate the real program instead of the plan. */
@@ -1066,7 +1072,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
     plannedToday, exTotal, exFilled, exComplete, todayVol, lastVol,
     liveDelta, beating, stripColor, bodyweight, lastLogged,
-  } = useExerciseEntry(data, update, ex, sessionKey, isDeload);
+  } = exerciseEntry(data, update, ex, sessionKey, isDeload);
 
   /* Baked-in sets: opening the card lays out (and heals) the planned set count */
   useEffect(() => {
@@ -1327,10 +1333,15 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
 function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, initialOpen }) {
   const [open, setOpen] = useState(!!initialOpen);
   const [detail, setDetail] = useState(null); /* member id whose extras are shown */
+  /* Swap state is a single pair scoped to whichever member's detail panel is
+     open — only one detail panel can be open at a time, so this never needs
+     to be keyed by member id; it is reset whenever the open member changes. */
+  const [swapping, setSwapping] = useState(false);
+  const [swapText, setSwapText] = useState("");
   const members = group.members;
   const rounds = group.rounds;
   /* One entry controller per member, in render order. */
-  const ctl = members.map((m) => useExerciseEntry(data, update, m, sessionKey, isDeload));
+  const ctl = members.map((m) => exerciseEntry(data, update, m, sessionKey, isDeload));
 
   /* Baked-in sets: opening the card lays out (and heals) every member's
      planned set count, mirroring ExerciseCard. */
@@ -1346,7 +1357,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, rounds]);
+  }, [open, rounds, members.length]);
 
   const roundDone = (r) => members.every((m, i) => {
     /* A member skipped wholesale is done for every round — setSkipAll marks
@@ -1411,40 +1422,46 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
             <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
           </Row>
 
-          {/* rounds */}
-          {Array.from({ length: rounds }, (_, r) => (
-            <div key={r} style={{ borderTop: r === 0 ? "none" : `1px dashed ${T.line}`, paddingTop: r === 0 ? 0 : 9, marginBottom: 6 }}>
-              <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6, color: r === nowRound ? T.blue : T.faint, fontWeight: r === nowRound ? 700 : 400 }}>
-                Round {r + 1}{roundDone(r) ? " ✓" : r === nowRound ? " — now" : ""}
-              </div>
-              {members.map((m, i) => {
-                if (ctl[i].skippedAll) {
-                  return (
-                    <div key={m.id} style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9, marginBottom: 4, opacity: 0.5 }}>
-                      <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
-                        {m.icon ? m.icon + " " : ""}{m.name}
+          {/* rounds — a continuous rail runs the full height of this region,
+              spanning every round, so the members read as one thing. It is
+              purely decorative chrome (neutral T.line); the semantic verdict
+              lives in each member row's own notch below. */}
+          <div style={{ position: "relative", paddingLeft: 11 }}>
+            <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: T.line }} />
+            {Array.from({ length: rounds }, (_, r) => (
+              <div key={r} style={{ borderTop: r === 0 ? "none" : `1px dashed ${T.line}`, paddingTop: r === 0 ? 0 : 9, marginBottom: 6 }}>
+                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6, color: r === nowRound ? T.blue : T.faint, fontWeight: r === nowRound ? 700 : 400 }}>
+                  Round {r + 1}{roundDone(r) ? " ✓" : r === nowRound ? " — now" : ""}
+                </div>
+                {members.map((m, i) => {
+                  if (ctl[i].skippedAll) {
+                    return (
+                      <div key={m.id} style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9, marginBottom: 4, opacity: 0.5 }}>
+                        <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
+                          {m.icon ? m.icon + " " : ""}{m.name}
+                        </div>
+                        <div style={{ fontSize: 13, color: T.faint }}>— skipped today</div>
                       </div>
-                      <div style={{ fontSize: 13, color: T.faint }}>— skipped today</div>
+                    );
+                  }
+                  const s = ctl[i].todaySets.filter((x) => !x.extra)[r];
+                  if (!s) return null;
+                  const absIdx = ctl[i].todaySets.indexOf(s);
+                  return (
+                    <div key={m.id} style={{ borderLeft: `2px solid ${ctl[i].stripColor}`, paddingLeft: 9, marginBottom: 4 }}>
+                      <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
+                        {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
+                      </div>
+                      <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal}
+                        compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
+                        onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
+                        onRemove={() => ctl[i].removeSetAt(absIdx)} />
                     </div>
                   );
-                }
-                const s = ctl[i].todaySets.filter((x) => !x.extra)[r];
-                if (!s) return null;
-                const absIdx = ctl[i].todaySets.indexOf(s);
-                return (
-                  <div key={m.id} style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9, marginBottom: 4 }}>
-                    <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
-                      {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
-                    </div>
-                    <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal}
-                      compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
-                      onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
-                      onRemove={() => ctl[i].removeSetAt(absIdx)} />
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+                })}
+              </div>
+            ))}
+          </div>
 
           {/* extras sit outside the planned rounds, so they render as solo tails */}
           {members.map((m, i) => ctl[i].todaySets.map((s, absIdx) => (s.extra ? (
@@ -1464,7 +1481,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
           <Row style={{ gap: 6, marginTop: 10, flexWrap: "wrap" }}>
             {members.map((m) => (
               <button key={m.id} className="ll-btn ll-btn-sm"
-                onClick={() => setDetail(detail === m.id ? null : m.id)}
+                onClick={() => { setDetail(detail === m.id ? null : m.id); setSwapping(false); setSwapText(""); }}
                 aria-expanded={detail === m.id}>
                 {m.name} ⋯
               </button>
@@ -1509,6 +1526,31 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
               <input className="ll-input" style={{ marginTop: 9, fontSize: 13 }}
                 placeholder={`Note for ${m.name}…`} value={(ctl[i].entry && ctl[i].entry.note) || ""}
                 onChange={(e) => update((d) => { ctl[i].ensureEntry(d).note = e.target.value; })} />
+
+              {/* swap exercise — mirrors ExerciseCard's swap block, scoped to
+                  this member's own entry so a pre-existing swap set before
+                  linking can be cleared without unlinking the whole group */}
+              <div style={{ marginTop: 10 }}>
+                {swapping ? (
+                  <Row>
+                    <input className="ll-input" autoFocus placeholder="What are you doing instead?" value={swapText}
+                      onChange={(e) => setSwapText(e.target.value)} />
+                    <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                      update((d) => { ctl[i].ensureEntry(d).swapName = swapText.trim(); });
+                      setSwapping(false);
+                    }}>Set</button>
+                  </Row>
+                ) : ctl[i].entry && ctl[i].entry.swapName ? (
+                  <button className="ll-btn ll-btn-sm" onClick={() => update((d) => { ctl[i].ensureEntry(d).swapName = ""; })}>
+                    Undo swap (back to {m.name})
+                  </button>
+                ) : (
+                  <button style={{ background: "none", border: "none", color: T.faint, fontSize: 13, cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                    onClick={() => { setSwapText(""); setSwapping(true); }}>
+                    ⇄ Swap exercise for today
+                  </button>
+                )}
+              </div>
             </div>
           ) : null))}
         </div>
@@ -3285,9 +3327,9 @@ function ManageView({ data, update, reseed, restore }) {
                         <span className="ll-num" style={{ fontSize: 13, fontWeight: 700 }}>{g.rounds} rounds</span>
                         <button className="ll-btn ll-btn-sm" aria-label="Add a round"
                           onClick={() => update((d) => { setSupersetRounds(mutListFor(d, day), g.id, g.rounds + 1); })}>+</button>
-                        <button className="ll-btn ll-btn-sm" aria-label="Move superset up"
+                        <button className="ll-btn ll-btn-sm" aria-label="Move superset up" disabled={gi === 0} style={{ opacity: gi === 0 ? 0.35 : 1 }}
                           onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, -1); })}>↑</button>
-                        <button className="ll-btn ll-btn-sm" aria-label="Move superset down"
+                        <button className="ll-btn ll-btn-sm" aria-label="Move superset down" disabled={gi === garr.length - 1} style={{ opacity: gi === garr.length - 1 ? 0.35 : 1 }}
                           onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, 1); })}>↓</button>
                         <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
                           onClick={() => { update((d) => { unlinkSuperset(mutListFor(d, day), g.id); }); setLinkNote(null); }}>unlink</button>
@@ -3314,7 +3356,15 @@ function ManageView({ data, update, reseed, restore }) {
                             <Row style={{ gap: 4 }}>
                               <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(m.id); setEditText(m.name); }}>✎</button>
                               <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
-                                onClick={() => update((d) => { removeEx(d, day, m.id); })}>✕</button>
+                                onClick={() => update((d) => {
+                                  removeEx(d, day, m.id);
+                                  /* Deleting one half of a pair leaves the survivor
+                                     carrying a supersetId no one else shares — clear
+                                     it so "never a superset" and "was a superset" stay
+                                     distinguishable in the raw blob. */
+                                  const remaining = mutListFor(d, day).filter((x) => x.supersetId === g.id);
+                                  if (remaining.length < 2) remaining.forEach((x) => delete x.supersetId);
+                                })}>✕</button>
                             </Row>
                           </>
                         )}

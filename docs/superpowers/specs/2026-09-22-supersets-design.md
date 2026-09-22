@@ -124,13 +124,24 @@ member's own `lastEntryFor(...)`. This preserves, with no new code:
 
 `ExerciseCard` owns `ensureEntry`, `changeSet`, `addExtraSet`, the completion
 math and the burst animation. `SupersetCard` needs all of it per member. Extract
-a hook:
+a function:
 
 ```js
-useExerciseEntry(data, update, ex, sessionKey, isDeload)
+exerciseEntry(data, update, ex, sessionKey, isDeload)
   -> { entry, variant, lastSame, lastAny, sets, ensureEntry, changeSet,
        addExtraSet, setSkipAll, exTotal, exFilled, exComplete, delta, stripColor }
 ```
+
+Named `exerciseEntry`, not `useExerciseEntry`, despite reading like a hook
+extraction: it is deliberately called from inside `SupersetCard`'s
+`members.map(...)`, once per member. A `use`-prefixed name would advertise
+hook rules (stable call count/order) that this call site violates on purpose,
+and would invite someone to add a `useState`/`useMemo` inside it later — which
+would turn a stable-keyed card into a component with a variable-length hook
+list and crash React. It contains no hooks and must stay that way; the name
+says so up front. (Amended post-review — the design originally called this
+`useExerciseEntry`; the controller ruled the name is incidental to the design
+while the crash class it invites is real.)
 
 The exact returned shape is illustrative — it must be whatever `ExerciseCard`
 already derives, moved verbatim. The rule is that nothing in `ExerciseCard`'s
@@ -185,7 +196,7 @@ Deliberately minimal — per-exercise history is the point of the Progress tab.
 ## Phasing
 
 **Phase 1 — the usable feature.** `supersetId`, `groupedExercises`,
-`useExerciseEntry` extraction, `SupersetCard`, Manage chain linking and the group
+`exerciseEntry` extraction, `SupersetCard`, Manage chain linking and the group
 block. Ships as a complete feature.
 
 **Phase 2 — the cosmetic tail.** Progress `🔗` markers and the CSV extras note.
@@ -208,7 +219,7 @@ extras render as a solo tail row.
 
 Real-Chrome tests, driven against a seeded blob:
 
-- **Single-exercise logging regression** covering the `useExerciseEntry`
+- **Single-exercise logging regression** covering the `exerciseEntry`
   refactor: open a normal card, log sets, confirm cascade, target placeholder,
   green/red and completion all behave as before.
 - Link a pair in Manage; confirm the group appears in Log with the right round

@@ -4,7 +4,18 @@
 
 **Goal:** Log a superset as one connected card with round-interleaved sets, and create the pairing from Manage with a chain link between adjacent exercises.
 
-**Architecture:** One optional `supersetId` field on an exercise groups members; rounds are the existing `targetSets` kept in sync across members, so all downstream set-counting math is untouched. Session entries stay keyed by exercise id, preserving per-exercise-per-machine comparisons. `ExerciseCard`'s entry logic is lifted verbatim into a `useExerciseEntry` hook that both `ExerciseCard` and the new `SupersetCard` consume.
+**Architecture:** One optional `supersetId` field on an exercise groups members; rounds are the existing `targetSets` kept in sync across members, so all downstream set-counting math is untouched. Session entries stay keyed by exercise id, preserving per-exercise-per-machine comparisons. `ExerciseCard`'s entry logic is lifted verbatim into an `exerciseEntry` function that both `ExerciseCard` and the new `SupersetCard` consume.
+
+> **Post-review amendment:** this plan and the spec originally called the
+> extraction `useExerciseEntry`. Final review renamed it to `exerciseEntry`
+> (kept everywhere below) because it contains no React hooks and is called
+> once per member inside `SupersetCard`'s `members.map(...)` — legal for a
+> plain function, illegal for a hook. The `use` prefix advertised a
+> constraint the code doesn't have and invited a future `useState`/`useMemo`
+> to be added inside it, which would give a stable-keyed component a
+> variable-length hook list and crash React. The name is incidental to the
+> design; the crash class it invites is real, so the controller ruled the
+> spec amended here rather than obeyed.
 
 **Tech Stack:** React 18 UMD + Babel-standalone, JSX inside a single `<script type="text/babel">` per HTML file. No bundler. Tests are plain Node scripts using esbuild (via npx) to compile the in-page script, plus react-dom/server for render assertions and puppeteer-core driving the installed Chrome for UI assertions.
 
@@ -537,7 +548,7 @@ being dropped inside a superset."
 
 ---
 
-### Task 3: Extract `useExerciseEntry` from `ExerciseCard`
+### Task 3: Extract `exerciseEntry` from `ExerciseCard`
 
 This task adds no feature. It is a strictly behaviour-preserving refactor that
 `SupersetCard` depends on, gated by a real-browser regression test on the
@@ -549,7 +560,7 @@ single-exercise logging path.
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1–2.
-- Produces: `useExerciseEntry(data, update, ex, sessionKey, isDeload)` returning
+- Produces: `exerciseEntry(data, update, ex, sessionKey, isDeload)` returning
   exactly:
   ```
   { exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
@@ -563,7 +574,7 @@ single-exercise logging path.
 `test/logging-regression.test.js`:
 
 ```javascript
-/* Guards the useExerciseEntry extraction: single-exercise logging must behave
+/* Guards the exerciseEntry extraction: single-exercise logging must behave
    exactly as before. Drives the real app in Chrome.
    Prereqs: `python3 -m http.server 8777` in the repo root. */
 const path = require("path");
@@ -702,7 +713,7 @@ git commit -m "Add single-exercise logging regression test
 
 Captures the current behaviour of ExerciseCard's logging path — target
 placeholder, weight cascade, per-set green/red, completion, extra sets,
-skip-all — so the useExerciseEntry extraction can be proven behaviour
+skip-all — so the exerciseEntry extraction can be proven behaviour
 preserving rather than assumed to be."
 ```
 
@@ -717,8 +728,14 @@ reformulate any of it:
 /* Everything an exercise's log entry needs, independent of how it is laid
    out. ExerciseCard renders one of these; SupersetCard renders one per
    member of a group. Lifted wholesale out of ExerciseCard — the logic is
-   unchanged, it just has two callers now. */
-function useExerciseEntry(data, update, ex, sessionKey, isDeload) {
+   unchanged, it just has two callers now.
+
+   NOT a hook, despite what it derives — it deliberately contains NO useState/
+   useEffect/useRef/useMemo, which is the only reason SupersetCard can call it
+   once per member inside members.map(). Adding a hook here would produce a
+   variable-length hook list under a stable React key and crash the card.
+   Keep it hook-free. */
+function exerciseEntry(data, update, ex, sessionKey, isDeload) {
   /* The array this exercise actually lives in. Deload plan entries keep the
      program's ids, so writing to d.exercises during a deload week would
      mutate the real program instead of the plan. */
@@ -821,7 +838,7 @@ component. Replace the deleted derivations with:
     changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
     plannedToday, exTotal, exFilled, exComplete, todayVol, lastVol,
     liveDelta, beating, stripColor, bodyweight, lastLogged,
-  } = useExerciseEntry(data, update, ex, sessionKey, isDeload);
+  } = exerciseEntry(data, update, ex, sessionKey, isDeload);
 ```
 
 Then replace the three call sites that used the now-hoisted inline logic:
@@ -876,7 +893,7 @@ Run the two esbuild commands from Global Constraints. Expected: no errors.
 
 ```bash
 git add index.html j.html
-git commit -m "Extract useExerciseEntry from ExerciseCard
+git commit -m "Extract exerciseEntry from ExerciseCard
 
 Behaviour-preserving lift of the entry, comparison, mutation and
 completion logic so SupersetCard can reuse it per member. ExerciseCard
@@ -893,7 +910,7 @@ otherwise unchanged; the logging regression test passes unchanged."
 - Test: `test/superset-render.test.js`
 
 **Interfaces:**
-- Consumes: `groupedExercises`, `supersetRounds` (Task 1); `useExerciseEntry` (Task 3); `SetRow`, `Delta`, `Row`, `VariantDot`, `setsLine`, `fmtVol`, `fmtDate` (existing).
+- Consumes: `groupedExercises`, `supersetRounds` (Task 1); `exerciseEntry` (Task 3); `SetRow`, `Delta`, `Row`, `VariantDot`, `setsLine`, `fmtVol`, `fmtDate` (existing).
 - Produces: `SupersetCard({ data, update, group, sessionKey, dayColor, isDeload })`.
 
 **Layout note — a deviation from the approved mockup.** The mockup showed the
@@ -1053,7 +1070,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
   const members = group.members;
   const rounds = group.rounds;
   /* One entry controller per member, in render order. */
-  const ctl = members.map((m) => useExerciseEntry(data, update, m, sessionKey, isDeload));
+  const ctl = members.map((m) => exerciseEntry(data, update, m, sessionKey, isDeload));
 
   /* Baked-in sets: opening the card lays out (and heals) every member's
      planned set count, mirroring ExerciseCard. */
@@ -1678,7 +1695,7 @@ now swap whole groups so a loose exercise cannot land inside a superset."
 python3 - <<'PY'
 import re, difflib
 names = ["supersetRounds", "groupedExercises", "linkSuperset", "unlinkSuperset",
-         "setSupersetRounds", "moveExerciseGroup", "useExerciseEntry", "SupersetCard"]
+         "setSupersetRounds", "moveExerciseGroup", "exerciseEntry", "SupersetCard"]
 out = {}
 for f in ("index.html", "j.html"):
     lines = open(f).read().split("\n")
@@ -1761,7 +1778,7 @@ Ask whether to merge and deploy.
 
 **Spec coverage.** Data model → Task 1. Grouping incl. first-appearance and
 orphan collapse → Task 1. Rounds-as-`targetSets` and the max safety net → Tasks
-1–2. `SetRow` reuse and `compareSet` → Task 4. `useExerciseEntry` extraction and
+1–2. `SetRow` reuse and `compareSet` → Task 4. `exerciseEntry` extraction and
 its regression gate → Task 3. Round blocks, `— now`, `✓`, per-member delta,
 extras-as-solo-tail, per-member `⋯` → Task 4. `TodayView` dispatch → Task 4.
 Manage chain pill, upward reconciliation with inline notice, triset by joining,
@@ -1791,6 +1808,6 @@ by the two cross-day assertions in Task 2.
 **Type consistency.** `supersetRounds(members)`, `groupedExercises(list)`,
 `linkSuperset(list, idA, idB) -> {id, raised}`, `unlinkSuperset(list, id)`,
 `setSupersetRounds(list, id, rounds)`, `moveExerciseGroup(list, day, key, dir)` and
-`useExerciseEntry(...)`'s returned keys are used with those exact names and
+`exerciseEntry(...)`'s returned keys are used with those exact names and
 shapes in Tasks 3–5. `group.rounds` / `group.members` / `group.id` / `group.kind`
 match `groupedExercises`'s output in both `SupersetCard` and `ManageView`.
