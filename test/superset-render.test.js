@@ -62,6 +62,29 @@ const mkBlob = () => ({
   },
 });
 
+/* An extra set on one member — exercises the solo tail-row rendering that
+   had zero coverage before this fix round. */
+const mkExtraBlob = () => {
+  const data = mkBlob();
+  data.sessions["2026-09-22|Tuesday"].entries.curl.sets.push({ w: 50, r: 8, extra: true, tag: "" });
+  return data;
+};
+
+/* One member skipped wholesale, the other's round 1 logged — exercises
+   Finding 1: setSkipAll marks only entry.skippedAll, never individual
+   sets, so SupersetCard must consult ctl[i].skippedAll directly or a
+   round with a skipped member can never complete. The skipped member's
+   own sets are left unlogged (r: ""), matching what setSkipAll actually
+   produces, so this fixture can only pass by reading skippedAll — not
+   by coincidentally reusing already-logged reps from the base fixture. */
+const mkSkipBlob = () => {
+  const data = mkBlob();
+  const curlEntry = data.sessions["2026-09-22|Tuesday"].entries.curl;
+  curlEntry.skippedAll = true;
+  curlEntry.sets = curlEntry.sets.map((s) => ({ ...s, r: "" }));
+  return data;
+};
+
 for (const file of ["index.html", "j.html"]) {
   console.log(`\n== ${file} ==`);
   const M = loadWithRealReact(file, ["SupersetCard", "groupedExercises", "applyTheme", "applySchedule", "T"]);
@@ -90,11 +113,14 @@ for (const file of ["index.html", "j.html"]) {
   ok("shows the round count", /3\s*ROUNDS/i.test(m));
   /* Golden Rule 4: amber means tie/no-comparison, so it must not be doing
      structural work. The tag is T.muted and the group border is T.line.
-     (The card renders "Superset" in markup — the caps are CSS only.) */
+     (The card renders "Superset" in markup — the caps are CSS only.)
+     Match the tag element's own inline style directly, rather than
+     searching the whole document, so a wrongly-coloured tag actually
+     fails this assertion. */
+  const tagMatch = m.match(/<div style="([^"]*)">[^<]*Superset/i);
   ok("superset tag uses the muted colour, not amber",
-     new RegExp(`color:\\s*${M.T.muted}[^"]*"[^>]*>[^<]*Superset`, "i").test(m) ||
-     /Superset/.test(m) && !new RegExp(M.T.amber, "i").test(m.slice(0, m.indexOf("Superset"))),
-     `-> tag region`);
+     !!tagMatch && tagMatch[1].includes(`color:${M.T.muted}`) && !tagMatch[1].includes(`color:${M.T.amber}`),
+     `-> style="${tagMatch && tagMatch[1]}"`);
   ok("collapsed card introduces no amber chrome", !new RegExp(M.T.amber, "i").test(m),
      `-> amber present: ${new RegExp(M.T.amber, "i").test(m)}`);
 
@@ -110,9 +136,45 @@ for (const file of ["index.html", "j.html"]) {
   ok("open card renders a set row per member per round",
      (open.match(/aria-label="reps"/g) || []).length === 6,
      `-> ${(open.match(/aria-label="reps"/g) || []).length}`);
-  ok("marks the first incomplete round as now", /Round 2[^<]*now/i.test(open) || /now/i.test(open.split("Round 2")[1] || ""));
+  /* Anchored to the round label's own text node (">Round 2 — now<") so a
+     "— now" marker landing on the wrong round actually fails this. */
+  ok("marks the first incomplete round as now", />Round 2 — now</.test(open));
   ok("round 1 marked complete", /Round 1[\s\S]{0,40}✓/.test(open));
   ok("member names label their rows", (open.match(/Leg Curl/g) || []).length >= 3);
+
+  /* Extras — zero coverage before this fix round. */
+  const extraData = mkExtraBlob();
+  const extraGroup = M.groupedExercises(extraData.exercises.filter((e) => e.day === "Tuesday"))[0];
+  const extraOpen = renderToStaticMarkup(React.createElement(M.SupersetCard, {
+    data: extraData, update: () => {}, group: extraGroup, sessionKey: "2026-09-22|Tuesday",
+    dayColor: "#69B56D", isDeload: false, initialOpen: true,
+  }));
+  const extraTails = extraOpen.match(/Extra · [^<]+ only/g) || [];
+  ok("exactly one extra tail row renders", extraTails.length === 1, `-> ${JSON.stringify(extraTails)}`);
+  ok("extra tail row is labelled with that member's name", extraTails[0] === "Extra · Leg Curl only",
+     `-> ${extraTails[0]}`);
+  const lastRoundIdx = extraOpen.lastIndexOf("Round 3");
+  const extraIdx = extraOpen.indexOf("Extra ·");
+  ok("extra tail row renders after the round blocks", lastRoundIdx !== -1 && extraIdx > lastRoundIdx,
+     `-> round@${lastRoundIdx} extra@${extraIdx}`);
+
+  /* Finding 1: a wholesale-skipped member (setSkipAll marks only the entry,
+     never the individual sets) must still let its round complete, must
+     render as a skipped placeholder rather than a bare editable SetRow,
+     and must let "now" advance past it. */
+  const skipData = mkSkipBlob();
+  const skipGroup = M.groupedExercises(skipData.exercises.filter((e) => e.day === "Tuesday"))[0];
+  const skipOpen = renderToStaticMarkup(React.createElement(M.SupersetCard, {
+    data: skipData, update: () => {}, group: skipGroup, sessionKey: "2026-09-22|Tuesday",
+    dayColor: "#69B56D", isDeload: false, initialOpen: true,
+  }));
+  ok("round 1 completes when the skipped member counts as done", />Round 1 ✓</.test(skipOpen));
+  ok("skipped member renders a skipped placeholder, not a reps input", /— skipped today/.test(skipOpen));
+  const skipRepsCount = (skipOpen.match(/aria-label="reps"/g) || []).length;
+  const memberRoundCount = skipGroup.members.length * skipGroup.rounds;
+  ok("skipped member contributes no reps inputs, so the open card has fewer than members × rounds",
+     skipRepsCount === 3 && skipRepsCount < memberRoundCount, `-> ${skipRepsCount} reps inputs`);
+  ok("now marker advances past the completed round", />Round 2 — now</.test(skipOpen));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
