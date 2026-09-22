@@ -145,6 +145,25 @@ const blob = {
      `-> ${e.press.sets.length}/${e.curl.sets.length}`);
   ok("round 1 marks complete", /Round 1[\s\S]{0,40}✓/i.test(await txt()));
 
+  /* The skip button used to shear off the right edge of the card — 27px of
+     overflow on a superset at 390px, worse on narrower phones, and ordinary
+     exercise cards clipped too. Assert it fits at the narrowest common iPhone
+     width, with the superset card open (the widest row the app renders). */
+  await page.setViewport({ width: 375, height: 950, deviceScaleFactor: 2 });
+  await wait(700);
+  const clip = await page.evaluate(() => {
+    const inp = document.querySelector('input[aria-label="reps"]');
+    if (!inp) return { err: "no set row open" };
+    const card = inp.closest(".ll-card");
+    const skip = [...document.querySelectorAll("button")].find((b) => /^skip$/.test((b.textContent || "").trim()));
+    if (!skip) return { err: "no skip button" };
+    return { overflow: Math.round(skip.getBoundingClientRect().right - card.getBoundingClientRect().right) };
+  });
+  ok("skip button fits inside the card at 375px", clip.overflow !== undefined && clip.overflow <= 0,
+     `-> ${clip.err || clip.overflow + "px relative to the card edge"}`);
+  await page.setViewport({ width: 420, height: 950, deviceScaleFactor: 2 });
+  await wait(500);
+
   /* ---- Manage: ✎ inside the group block actually edits a member ---- */
   ok("Manage reopens for the edit check", await clickText("Manage")); await wait(700);
   ok("clicked ✎ on a grouped member", await clickText("✎"));

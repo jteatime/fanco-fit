@@ -142,6 +142,17 @@ for (const file of ["index.html", "j.html"]) {
   ok("round 1 marked complete", /Round 1[\s\S]{0,40}✓/.test(open));
   ok("member names label their rows", (open.match(/Leg Curl/g) || []).length >= 3);
 
+  /* The header counts ROUNDS, not summed sets: this fixture is 3 rounds with
+     round 1 logged for both members, so 1/3 — the old summed form said 2/6. */
+  ok("header counts rounds, not summed sets", / 1\/3</.test(m) || />1\/3</.test(m),
+     `-> ${(m.match(/>\d+\/\d+</g) || []).join(" ")}`);
+  ok("header does not show the summed set count", !/>2\/6</.test(m));
+
+  /* Round rows drop the redundant gutter index (the round label numbers them);
+     the reclaimed width is what stops the skip button shearing at 375px. */
+  const gutters = (open.match(/class="ll-num"[^>]*>\s*\d+\s*</g) || []).length;
+  ok("round rows carry no numeric gutter index", gutters === 0, `-> ${gutters} found`);
+
   /* Extras — zero coverage before this fix round. */
   const extraData = mkExtraBlob();
   const extraGroup = M.groupedExercises(extraData.exercises.filter((e) => e.day === "Tuesday"))[0];
