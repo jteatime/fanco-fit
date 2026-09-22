@@ -557,6 +557,42 @@ function daySessionInView(data, view, day, w) {
   );
 }
 
+/* ---- Supersets -----------------------------------------------------
+   A superset is a grouping over the flat exercise list, nothing more:
+   members share a `supersetId`, and session entries stay keyed by
+   exercise id so every comparison remains per exercise per machine.
+   Rounds are the members' shared `targetSets` — there is deliberately
+   no second source of truth for the round count. */
+
+/* Round count for a group. Members are kept in sync when linking and by
+   the group stepper; max() is the safety net for a hand-edited or
+   restored blob whose members drifted apart. */
+const supersetRounds = (members) =>
+  Math.max(1, ...members.map((m) => m.targetSets ?? 3));
+
+/* Lay a day's exercise list out as singles and superset groups.
+   Grouped by FIRST APPEARANCE rather than by consecutive runs: a reorder
+   that separated two members would silently split a run-based group. A
+   group that ends up with one member (its partner was deleted) collapses
+   back to a plain single, so half a pair can never render as a group. */
+function groupedExercises(list) {
+  const out = [];
+  const byId = {};
+  for (const ex of list) {
+    if (!ex.supersetId) { out.push({ kind: "single", ex }); continue; }
+    if (!byId[ex.supersetId]) {
+      byId[ex.supersetId] = { kind: "superset", id: ex.supersetId, members: [] };
+      out.push(byId[ex.supersetId]);
+    }
+    byId[ex.supersetId].members.push(ex);
+  }
+  return out.map((g) => {
+    if (g.kind !== "superset") return g;
+    if (g.members.length < 2) return { kind: "single", ex: g.members[0] };
+    return { ...g, rounds: supersetRounds(g.members) };
+  });
+}
+
 /* Archive the live cycle on rollover. Runs while the OLD cycleStart is
    still in effect, so deloadWeeks are still the right indices. */
 function archiveCurrentCycle(d, endIso) {

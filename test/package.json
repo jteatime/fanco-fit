@@ -1,0 +1,10 @@
+{
+  "name": "fanco-fit-tests",
+  "private": true,
+  "description": "Verification scripts only. The app itself has no build step.",
+  "devDependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "puppeteer-core": "23.11.1"
+  }
+}
