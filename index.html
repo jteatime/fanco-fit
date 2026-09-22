@@ -86,6 +86,7 @@ const RewardGlyph = ({ data, size = 13 }) => {
 };
 const WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_COLOR = {
   Sunday: "#5AA35F", Monday: "#B08BD0", Tuesday: "#CE5148", Wednesday: "#5480C8",
   Thursday: "#8B8F98", Friday: "#E3A93C", Saturday: "#6FA8A0",
@@ -289,6 +290,7 @@ function buildSeed() {
     noteAcks: {},
     deloadWeeks: [],
     deloadPlan: {},
+    cycleHistory: [],
     cycleNumber: 2,
     cycleName: "Cycle 2",
     cycleWeeks: 8,
@@ -466,6 +468,122 @@ function daySessionIn(data, day, w) {
   );
 }
 
+/* ---- Cycle history ------------------------------------------------
+   `cycleStart` is a single moving anchor: the moment a new cycle starts,
+   every earlier session falls to a negative week index and disappears
+   from the grid, the stat strip and the streak. cycleHistory keeps a
+   frozen record of each finished cycle so Progress can page back through
+   them. The live cycle is never duplicated into the array — it always
+   stays in the top-level cycleNumber/cycleName/cycleStart/cycleWeeks
+   fields, so current-cycle logging and targets are untouched. */
+
+/* Training weeks read Monday-first, so cycle boundaries snap there. */
+const mondayOnOrBefore = (iso) => {
+  const dow = new Date(iso + "T12:00:00").getDay(); /* 0 = Sunday */
+  return addDays(iso, dow === 0 ? -6 : 1 - dow);
+};
+/* Whole weeks spanned by an inclusive ISO date range. */
+const weeksBetween = (startIso, endIso) => {
+  const days = Math.round(
+    (new Date(endIso + "T12:00:00") - new Date(startIso + "T12:00:00")) / 864e5
+  ) + 1;
+  return Math.max(1, Math.ceil(days / 7));
+};
+
+/* Every cycle as a self-contained view, oldest first, live cycle last.
+   An archived view has a hard `end`; the live one has end === null. */
+function cycleViews(data) {
+  const out = (data.cycleHistory || []).map((c) => ({
+    number: c.number,
+    name: c.name || `Cycle ${c.number}`,
+    start: c.start,
+    end: c.end,
+    weeks: c.weeks || weeksBetween(c.start, c.end),
+    deloadWeeks: c.deloadWeeks || [],
+    isCurrent: false,
+  }));
+  out.push({
+    number: data.cycleNumber,
+    name: data.cycleName || `Cycle ${data.cycleNumber}`,
+    start: data.cycleStart,
+    end: null,
+    weeks: data.cycleWeeks || 8,
+    deloadWeeks: data.deloadWeeks || [],
+    isCurrent: true,
+  });
+  return out;
+}
+
+const weekIn = (view, iso) =>
+  Math.floor((new Date(iso + "T12:00:00") - new Date(view.start + "T12:00:00")) / (7 * 864e5));
+const inView = (view, iso) => iso >= view.start && (!view.end || iso <= view.end);
+const isDeloadWeekIn = (view, w) => (view.deloadWeeks || []).includes(w);
+const viewFor = (views, iso) => views.find((v) => inView(v, iso)) || null;
+
+/* exListFor, scoped to any cycle rather than only the live one. */
+const exListForView = (data, view, day, w) => {
+  if (!isDeloadWeekIn(view, w)) return data.exercises.filter((e) => e.day === day);
+  const plan = (data.deloadPlan || {})[day];
+  return plan || data.exercises.filter((e) => e.day === day);
+};
+
+/* daySessionIn, scoped to any cycle. */
+function daySessionInView(data, view, day, w) {
+  return sortedSessions(data).find(
+    (s) => s.day === day && inView(view, s.date) && weekIn(view, s.date) === w &&
+      Object.values(s.entries).some(entryHasData)
+  );
+}
+
+/* Archive the live cycle on rollover. Runs while the OLD cycleStart is
+   still in effect, so deloadWeeks are still the right indices. */
+function archiveCurrentCycle(d, endIso) {
+  d.cycleHistory = d.cycleHistory || [];
+  d.cycleHistory.push({
+    number: d.cycleNumber,
+    name: d.cycleName || `Cycle ${d.cycleNumber}`,
+    start: d.cycleStart,
+    end: endIso,
+    weeks: Math.max(d.cycleWeeks || 8, weeksBetween(d.cycleStart, endIso)),
+    deloadWeeks: (d.deloadWeeks || []).slice(),
+  });
+}
+
+/* Installs that rolled over before cycleHistory existed have sessions
+   sitting before cycleStart with no record of where they began. Fold
+   them into one reconstructed cycle: start snapped to the Monday of the
+   first logged week, end the day before the live cycle. Deload weeks
+   come back from the durable per-session `deload` stamps. */
+function migrateCycleHistory(d) {
+  if (!d.cycleHistory) d.cycleHistory = [];
+  if (d.cycleHistory.length) return d;
+  const dates = Object.values(d.sessions || {})
+    .filter((s) => Object.values(s.entries || {}).some(entryHasData))
+    .map((s) => s.date)
+    .filter((iso) => iso < d.cycleStart)
+    .sort();
+  if (!dates.length) return d;
+  const start = mondayOnOrBefore(dates[0]);
+  const end = addDays(d.cycleStart, -1);
+  const probe = { start, end };
+  const deloadWeeks = [];
+  for (const s of Object.values(d.sessions)) {
+    if (!s.deload || !inView(probe, s.date)) continue;
+    const w = weekIn(probe, s.date);
+    if (!deloadWeeks.includes(w)) deloadWeeks.push(w);
+  }
+  const n = Math.max(1, (d.cycleNumber || 2) - 1);
+  d.cycleHistory.push({
+    number: n,
+    name: `Cycle ${n}`,
+    start,
+    end,
+    weeks: Math.max(weeksBetween(start, end), weekIn(probe, dates[dates.length - 1]) + 1),
+    deloadWeeks: deloadWeeks.sort((a, b) => a - b),
+  });
+  return d;
+}
+
 /* Most recent session containing this exercise (optionally same variant), excluding a key */
 function lastEntryFor(data, exId, variantId, excludeKey, beforeDate) {
   const list = sortedSessions(data);
@@ -579,6 +697,29 @@ const toTSV = (rows) =>
 /* ------------------------------------------------------------------ */
 /* Small UI pieces                                                     */
 /* ------------------------------------------------------------------ */
+/* Horizontal swipe, for paging the cycle grid and the stat strip.
+   Deliberately NOT attached to the heatmap body — that owns its own
+   horizontal scroll for the week columns and a handler there fights it.
+   Returns props to spread onto the element that should listen. */
+function useSwipe(onNext, onPrev) {
+  const from = useRef(null);
+  return {
+    onTouchStart: (e) => {
+      const t = e.touches[0];
+      from.current = { x: t.clientX, y: t.clientY };
+    },
+    onTouchEnd: (e) => {
+      const s = from.current;
+      from.current = null;
+      if (!s || !e.changedTouches || !e.changedTouches.length) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - s.x, dy = t.clientY - s.y;
+      if (Math.abs(dx) < 40 || Math.abs(dy) > 30) return;
+      if (dx < 0) onNext(); else onPrev();
+    },
+  };
+}
+
 const Row = ({ children, style }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 8, ...style }}>{children}</div>
 );
@@ -1540,35 +1681,63 @@ const weightEntries = (data) =>
     .map(([iso, v]) => ({ iso, v }))
     .sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
 
-function weightTrend(data) {
-  const es = weightEntries(data).filter((e) => e.iso >= data.cycleStart);
+/* All four stat tiles take a `view`: null = all time, or one cycle. */
+const weightEntriesIn = (data, view) =>
+  weightEntries(data).filter((e) => !view || inView(view, e.iso));
+
+function weightTrendIn(data, view) {
+  const es = weightEntriesIn(data, view);
   if (es.length < 2) return null;
   const first = es[0], last = es[es.length - 1];
   return Math.round((last.v - first.v) * 10) / 10;
 }
 
-function scheduledSlots(data, uptoIso) {
-  const slots = [];
-  const totalW = weekOfCycle(data, uptoIso);
-  for (let w = 0; w <= totalW; w++) {
-    for (const day of DAYS) {
-      const date = cellDateFor(data.cycleStart, w, day);
-      if (date >= data.cycleStart && date <= uptoIso) slots.push({ day, date, week: w });
+/* Winning days: each session beating the previous one on the same weekday.
+   Deloads never count (Golden Rule: a light week isn't a loss or a win). */
+function winsIn(data, view) {
+  let wins = 0;
+  DAYS.forEach((day) => {
+    const list = sortedSessions(data).filter(
+      (s) => s.day === day && (!view || inView(view, s.date)) && !isDeloadSess(data, s) &&
+        Object.values(s.entries).some(entryHasData)
+    );
+    for (let i = 1; i < list.length; i++) {
+      if (dayVolume(list[i]) > dayVolume(list[i - 1])) wins += 1;
     }
-  }
-  return slots.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  });
+  return wins;
 }
 
-function currentStreak(data) {
-  const slots = scheduledSlots(data, todayISO());
+/* Streak walks calendar dates backward and looks sessions up by date, so
+   a cycle rollover never breaks it — the old week-index walk reset to 0
+   the instant cycleStart moved. `view` = null for an all-time streak, or
+   a cycle to stay inside. Scheduled days are matched against the CURRENT
+   DAYS schedule; no schedule history is stored, so an archived streak can
+   be a day out if the training days changed since. */
+function streakIn(data, views, view) {
+  const today = todayISO();
+  const from = view && view.end && view.end < today ? view.end : today;
+  const floorIso = view ? view.start : (views.length ? views[0].start : null);
+  const logged = new Set(
+    sortedSessions(data)
+      .filter((s) => Object.values(s.entries).some(entryHasData))
+      .map((s) => `${s.date}|${s.day}`)
+  );
   let n = 0;
-  for (let i = slots.length - 1; i >= 0; i--) {
-    const sl = slots[i];
-    if (daySessionIn(data, sl.day, sl.week)) { n++; continue; }
-    if (sl.date === todayISO()) continue;
-    if (OPTIONAL_DAYS[sl.day]) continue;
-    /* A deload day the user deliberately emptied is planned rest, not a miss */
-    if (isDeloadWeek(data, sl.week) && exListFor(data, sl.day, sl.week).length === 0) continue;
+  for (let i = 0; i < 1000; i++) {
+    const iso = addDays(from, -i);
+    if (floorIso && iso < floorIso) break;
+    const day = DAY_NAMES[new Date(iso + "T12:00:00").getDay()];
+    if (!DAYS.includes(day)) continue;
+    if (logged.has(`${iso}|${day}`)) { n++; continue; }
+    if (iso === today) continue;
+    if (OPTIONAL_DAYS[day]) continue;
+    /* A deload day deliberately emptied is planned rest, not a miss */
+    const v = view || viewFor(views, iso);
+    if (v) {
+      const w = weekIn(v, iso);
+      if (isDeloadWeekIn(v, w) && exListForView(data, v, day, w).length === 0) continue;
+    }
     break;
   }
   return n;
@@ -1664,21 +1833,16 @@ function LineChart({ points, color, fmt, showValues, onSelect }) {
   );
 }
 
-function StatStrip({ data }) {
-  const es = weightEntries(data);
+/* The four headline tiles. Scope is swipeable/tappable between all time
+   and the cycle currently shown in the grid below, so starting a new
+   cycle no longer blanks them out. */
+function StatStrip({ data, views, view, scope, setScope }) {
+  const scoped = scope === "cycle" ? view : null;
+  const es = weightEntriesIn(data, scoped);
   const latest = es.length ? es[es.length - 1].v : null;
-  const trend = weightTrend(data);
-  const streak = currentStreak(data);
-
-  let wins = 0;
-  DAYS.forEach((d) => {
-    const list = sortedSessions(data).filter(
-      (s) => s.day === d && weekOfCycle(data, s.date) >= 0 && !isDeloadSess(data, s) && Object.values(s.entries).some(entryHasData)
-    );
-    for (let i = 1; i < list.length; i++) {
-      if (dayVolume(list[i]) > dayVolume(list[i - 1])) wins += 1;
-    }
-  });
+  const trend = weightTrendIn(data, scoped);
+  const streak = streakIn(data, views, scoped);
+  const wins = winsIn(data, scoped);
 
   const trendStr = trend == null ? "—" : (trend < 0 ? `−${Math.abs(trend)}` : `+${trend}`);
   const tiles = [
@@ -1688,15 +1852,37 @@ function StatStrip({ data }) {
     { label: "Wins", value: String(wins) },
   ];
 
+  const opts = [["all", "All time"], ["cycle", view.name]];
+  const swipe = useSwipe(() => setScope("cycle"), () => setScope("all"));
+
   return (
-    <Row style={{ gap: 8, marginBottom: 14 }}>
-      {tiles.map((t) => (
-        <div key={t.label} className="ll-card" style={{ flex: 1, margin: 0, padding: "9px 4px", textAlign: "center" }}>
-          <div className="ll-num" style={{ fontSize: 15, fontWeight: 700, color: t.color || T.ink }}>{t.value}</div>
-          <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", color: T.faint, marginTop: 2 }}>{t.label}</div>
-        </div>
-      ))}
-    </Row>
+    <div style={{ marginBottom: 14 }} {...swipe}>
+      <Row style={{ gap: 4, marginBottom: 6, justifyContent: "center" }}>
+        {opts.map(([id, label], i) => (
+          <React.Fragment key={id}>
+            {i > 0 && <span style={{ color: T.line, fontSize: 10 }}>·</span>}
+            <button onClick={() => setScope(id)} aria-pressed={scope === id}
+              style={{
+                background: "none", border: "none", padding: "2px 6px", cursor: "pointer",
+                fontFamily: "inherit", fontSize: 9.5, textTransform: "uppercase",
+                letterSpacing: "0.07em", fontWeight: scope === id ? 700 : 400,
+                color: scope === id ? T.ink : T.faint,
+                borderBottom: `1.5px solid ${scope === id ? T.blue : "transparent"}`,
+              }}>
+              {label}
+            </button>
+          </React.Fragment>
+        ))}
+      </Row>
+      <Row style={{ gap: 8 }}>
+        {tiles.map((t) => (
+          <div key={t.label} className="ll-card" style={{ flex: 1, margin: 0, padding: "9px 4px", textAlign: "center" }}>
+            <div className="ll-num" style={{ fontSize: 15, fontWeight: 700, color: t.color || T.ink }}>{t.value}</div>
+            <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", color: T.faint, marginTop: 2 }}>{t.label}</div>
+          </div>
+        ))}
+      </Row>
+    </div>
   );
 }
 
@@ -1853,24 +2039,58 @@ function TrendCard({ data, update, day }) {
 /* ------------------------------------------------------------------ */
 /* Cycle grid — the whole cycle at a glance, like the sheet's columns  */
 /* ------------------------------------------------------------------ */
-function CycleGrid({ data, onOpenDay, onGoToday }) {
+/* The heatmap, scoped to one cycle. Pages through cycleViews() with the
+   header arrows or a swipe on the header — the grid body itself keeps its
+   own horizontal scroll for the week columns. */
+function CycleGrid({ data, views, view, viewIdx, setViewIdx, onOpenDay, onGoToday }) {
   const today = todayISO();
-  const curWeek = Math.max(0, weekOfCycle(data, today));
-  const weeks = Math.max(data.cycleWeeks || 8, curWeek + 1);
+  const curWeek = view.isCurrent ? Math.max(0, weekIn(view, today)) : -1;
+  const weeks = view.isCurrent ? Math.max(view.weeks, curWeek + 1) : view.weeks;
   const cols = Array.from({ length: weeks }, (_, w) => w);
   const rw = rewardOf(data);
   const monthOf = (w) =>
-    new Date(addDays(data.cycleStart, w * 7) + "T12:00:00").toLocaleDateString("en-US", { month: "short" });
-  const domOf = (w) => new Date(addDays(data.cycleStart, w * 7) + "T12:00:00").getDate();
+    new Date(addDays(view.start, w * 7) + "T12:00:00").toLocaleDateString("en-US", { month: "short" });
+  const domOf = (w) => new Date(addDays(view.start, w * 7) + "T12:00:00").getDate();
+
+  const canPrev = viewIdx > 0, canNext = viewIdx < views.length - 1;
+  const go = (delta) => {
+    const n = viewIdx + delta;
+    if (n >= 0 && n < views.length) setViewIdx(n);
+  };
+  const swipe = useSwipe(() => go(1), () => go(-1));
+  const range = view.end
+    ? `${fmtDate(view.start)} – ${fmtDate(view.end)}`
+    : `from ${fmtDate(view.start)}`;
 
   return (
     <div className="ll-card" style={{ padding: "12px 14px", marginBottom: 14 }}>
-      <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
-        <span className="ll-display" style={{ fontSize: 16, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-          {data.cycleName || `Cycle ${data.cycleNumber}`}
-        </span>
-        <span className="ll-num" style={{ color: T.faint, fontSize: 11.5 }}>week {Math.min(curWeek + 1, weeks)} of {weeks}</span>
+      <Row style={{ justifyContent: "space-between", marginBottom: 10, gap: 6 }} {...swipe}>
+        <button className="ll-btn ll-btn-sm" onClick={() => go(-1)} disabled={!canPrev}
+          aria-label="Previous cycle"
+          style={{ flex: "none", padding: "3px 9px", opacity: canPrev ? 1 : 0.28 }}>‹</button>
+        <div style={{ textAlign: "center", minWidth: 0, flex: 1 }}>
+          <div className="ll-display" style={{ fontSize: 16, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {view.name}
+          </div>
+          <span className="ll-num" style={{ color: T.faint, fontSize: 11 }}>
+            {range}
+            {view.isCurrent ? ` · week ${Math.min(curWeek + 1, weeks)} of ${weeks}` : ` · ${weeks} wk`}
+          </span>
+        </div>
+        <button className="ll-btn ll-btn-sm" onClick={() => go(1)} disabled={!canNext}
+          aria-label="Next cycle"
+          style={{ flex: "none", padding: "3px 9px", opacity: canNext ? 1 : 0.28 }}>›</button>
       </Row>
+      {views.length > 1 && (
+        <Row style={{ gap: 4, justifyContent: "center", marginBottom: 9 }}>
+          {views.map((v, i) => (
+            <span key={v.number} aria-hidden="true" style={{
+              width: i === viewIdx ? 14 : 5, height: 5, borderRadius: 3,
+              background: i === viewIdx ? T.blue : T.line, transition: "width .15s",
+            }} />
+          ))}
+        </Row>
+      )}
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <div style={{ minWidth: weeks * 30 + 46 }}>
           <Row style={{ gap: 4 }}>
@@ -1894,8 +2114,9 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
             <Row key={d} style={{ gap: 4, marginBottom: 5 }}>
               <span style={{ width: 42, flex: "none", fontSize: 11, color: T.muted, alignSelf: "center" }}>{d.slice(0, 3)}</span>
               {cols.map((w) => {
-                const sess = daySessionIn(data, d, w);
-                const dateIso = cellDateFor(data.cycleStart, w, d);
+                const sess = daySessionInView(data, view, d, w);
+                const dateIso = cellDateFor(view.start, w, d);
+                const outside = !inView(view, dateIso);
                 let style = {
                   width: 26, height: 22, flex: "none", borderRadius: 5, padding: 0,
                   border: `1px solid ${T.line}`, background: "transparent",
@@ -1906,13 +2127,13 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                 if (sess) {
                   let prev = null;
                   for (let i = w - 1; i >= 0; i--) {
-                    if (isDeloadWeek(data, i)) continue;
-                    const p = daySessionIn(data, d, i); if (p) { prev = p; break; }
+                    if (isDeloadWeekIn(view, i)) continue;
+                    const p = daySessionInView(data, view, d, i); if (p) { prev = p; break; }
                   }
                   const dv = dayVolume(sess);
                   const pv = prev ? dayVolume(prev) : null;
                   const finishedCell = sess.celebrated || sess.date < today;
-                  if (isDeloadWeek(data, w)) {
+                  if (isDeloadWeekIn(view, w)) {
                     content = <span style={{ color: T.muted, fontSize: 12, opacity: 0.85 }}>☾</span>;
                   } else if (!finishedCell) {
                     content = <span style={{ width: 8, height: 8, borderRadius: 4, background: T.pos, display: "inline-block" }} />;
@@ -1934,13 +2155,16 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                   }
                   style.cursor = "pointer";
                   onClick = () => onOpenDay(sess.key);
+                } else if (outside) {
+                  /* Calendar slot that falls outside this cycle's date range */
+                  style.opacity = 0.18;
                 } else if (dateIso === today) {
                   style.border = `2px solid ${T.blue}`;
                   style.cursor = "pointer";
                   onClick = () => onGoToday(d);
                 } else if (dateIso < today) {
                   /* Emptied deload day = planned rest, same treatment as optional */
-                  if (OPTIONAL_DAYS[d] || (isDeloadWeek(data, w) && exListFor(data, d, w).length === 0)) {
+                  if (OPTIONAL_DAYS[d] || (isDeloadWeekIn(view, w) && exListForView(data, view, d, w).length === 0)) {
                     content = "•";
                     style.opacity = 0.55;
                   } else {
@@ -1949,14 +2173,14 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
                 } else {
                   style.opacity = 0.35;
                 }
-                if (dateIso === today) {
+                if (dateIso === today && !outside) {
                   style.border = `2px solid ${T.blue}`;
                   if (!onClick) { style.cursor = "pointer"; onClick = () => onGoToday(d); }
                 }
                 return (
                   <button key={w} style={style} onClick={onClick} disabled={!onClick}
-                    title={`${d} · ${fmtDate(dateIso)}`}
-                    aria-label={`${d} ${fmtDate(dateIso)}${sess ? ", open log" : dateIso < today ? ", missed" : ""}`}>
+                    title={outside ? "" : `${d} · ${fmtDate(dateIso)}`}
+                    aria-label={outside ? "outside this cycle" : `${d} ${fmtDate(dateIso)}${sess ? ", open log" : dateIso < today ? ", missed" : ""}`}>
                     {content}
                   </button>
                 );
@@ -1973,7 +2197,9 @@ function CycleGrid({ data, onOpenDay, onGoToday }) {
         {DAYS.some((d) => OPTIONAL_DAYS[d]) && (
           <Row style={{ gap: 5 }}><span style={{ fontSize: 10.5, color: T.faint }}>• optional rest</span></Row>
         )}
-        <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, border: `2px solid ${T.blue}`, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>today</span></Row>
+        {view.isCurrent && (
+          <Row style={{ gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 4, border: `2px solid ${T.blue}`, flex: "none" }} /><span style={{ fontSize: 10.5, color: T.faint }}>today</span></Row>
+        )}
       </Row>
     </div>
   );
@@ -1984,14 +2210,23 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
   const [openEx, setOpenEx] = useState(null);
   const [openDayKey, setOpenDayKey] = useState(null);
   const [timeEdit, setTimeEdit] = useState(null);
+  /* Which cycle the grid + stat strip are showing; defaults to the live
+     one so Progress opens agreeing with the Log tab. */
+  const views = cycleViews(data);
+  const [viewIdx, setViewIdx] = useState(views.length - 1);
+  const [scope, setScope] = useState("cycle");
+  const view = views[Math.min(viewIdx, views.length - 1)];
 
   /* Day log drill-in from the cycle grid */
   if (openDayKey && data.sessions[openDayKey]) {
     const sess = data.sessions[openDayKey];
     const d = sess.day;
-    const w = weekOfCycle(data, sess.date);
+    /* A session opened from an archived cycle has no meaningful index in
+       the live cycle — resolve week and previous week inside its own. */
+    const sv = viewFor(views, sess.date) || view;
+    const w = weekIn(sv, sess.date);
     let prev = null;
-    for (let i = w - 1; i >= 0; i--) { const p = daySessionIn(data, d, i); if (p) { prev = p; break; } }
+    for (let i = w - 1; i >= 0; i--) { const p = daySessionInView(data, sv, d, i); if (p) { prev = p; break; } }
     const vol = dayVolume(sess);
     const delta = prev ? pct(dayVolume(prev), vol) : null;
     const hasStamps = sess.startedAt && sess.finishedAt;
@@ -2026,8 +2261,8 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
           <Delta value={delta} />
         </Row>
         <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>
-          Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
-          {prev ? ` · vs week ${weekOfCycle(data, prev.date) + 1}` : ""}
+          {sv.isCurrent ? "" : `${sv.name} · `}Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
+          {prev ? ` · vs week ${weekIn(sv, prev.date) + 1}` : ""}
         </div>
         {(sess.dayNote || "").trim() && <div className="ll-note" style={{ marginBottom: 14 }}>“{sess.dayNote}”</div>}
         <div className="ll-card" style={{ padding: "12px 14px", marginBottom: 14 }}>
@@ -2179,9 +2414,12 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
         })}
       </Row>
       <div className="ll-display" style={{ fontSize: 26, fontWeight: 700, marginBottom: 2 }}>Progress</div>
-      <div style={{ color: T.muted, fontSize: 13, marginBottom: 12 }}>{data.cycleName || `Cycle ${data.cycleNumber}`}</div>
-      <StatStrip data={data} />
-      <CycleGrid data={data} onOpenDay={setOpenDayKey} onGoToday={onGoToday} />
+      <div style={{ color: T.muted, fontSize: 13, marginBottom: 12 }}>
+        {views.length > 1 ? "Swipe the strip or the cycle title to look around" : (data.cycleName || `Cycle ${data.cycleNumber}`)}
+      </div>
+      <StatStrip data={data} views={views} view={view} scope={scope} setScope={setScope} />
+      <CycleGrid data={data} views={views} view={view} viewIdx={viewIdx} setViewIdx={setViewIdx}
+        onOpenDay={setOpenDayKey} onGoToday={onGoToday} />
       <TrendCard data={data} update={update} day={day} />
       {exList.map((ex) => {
         const hist = historyFor(data, ex.id);
@@ -2394,6 +2632,10 @@ function ManageView({ data, update, reseed, restore }) {
           ex.prev = isFinite(top) ? top : ex.prev;
         }
       });
+      /* Freeze the outgoing cycle so Progress can still page back to it.
+         Must run before cycleStart moves — its deloadWeeks indices are
+         relative to the old anchor. */
+      archiveCurrentCycle(d, addDays(todayISO(), -1));
       d.cycleNumber += 1;
       d.cycleName = `Cycle ${d.cycleNumber}`;
       d.cycleStart = todayISO();
@@ -2635,6 +2877,7 @@ function ManageView({ data, update, reseed, restore }) {
         </div>
         <div style={{ color: T.muted, fontSize: 13, marginBottom: 10 }}>
           Starting a new cycle saves each exercise's latest top weight as its "last cycle" reference — the number you used to copy into the Prev column.
+          {" "}Cycle {data.cycleNumber} gets archived, not erased — swipe back to it any time from Progress.
         </div>
         {confirmCycle ? (
           <Row>
@@ -3160,6 +3403,7 @@ function App() {
           if (!parsed.noteAcks) parsed.noteAcks = {};
           if (!parsed.deloadWeeks) parsed.deloadWeeks = [];
           if (!parsed.deloadPlan) parsed.deloadPlan = {};
+          migrateCycleHistory(parsed);
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
           bootNotes(parsed);
@@ -3284,7 +3528,7 @@ function App() {
           <ProgressView data={data} update={update} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { migrateCycleHistory(next); applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (
