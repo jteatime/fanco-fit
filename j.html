@@ -524,6 +524,115 @@ function daySessionInView(data, view, day, w) {
   );
 }
 
+/* ---- Supersets -----------------------------------------------------
+   A superset is a grouping over the flat exercise list, nothing more:
+   members share a `supersetId`, and session entries stay keyed by
+   exercise id so every comparison remains per exercise per machine.
+   Rounds are the members' shared `targetSets` — there is deliberately
+   no second source of truth for the round count. */
+
+/* Round count for a group. Members are kept in sync when linking and by
+   the group stepper; max() is the safety net for a hand-edited or
+   restored blob whose members drifted apart. */
+const supersetRounds = (members) =>
+  Math.max(1, ...members.map((m) => m.targetSets ?? 3));
+
+/* Lay a day's exercise list out as singles and superset groups.
+   Grouped by FIRST APPEARANCE rather than by consecutive runs: a reorder
+   that separated two members would silently split a run-based group. A
+   group that ends up with one member (its partner was deleted) collapses
+   back to a plain single, so half a pair can never render as a group. */
+function groupedExercises(list) {
+  const out = [];
+  const byId = {};
+  for (const ex of list) {
+    if (!ex.supersetId) { out.push({ kind: "single", ex }); continue; }
+    if (!byId[ex.supersetId]) {
+      byId[ex.supersetId] = { kind: "superset", id: ex.supersetId, members: [] };
+      out.push(byId[ex.supersetId]);
+    }
+    byId[ex.supersetId].members.push(ex);
+  }
+  return out.map((g) => {
+    if (g.kind !== "superset") return g;
+    if (g.members.length < 2) return { kind: "single", ex: g.members[0] };
+    return { ...g, rounds: supersetRounds(g.members) };
+  });
+}
+
+/* Link two exercises in the same day's list into one group. If either is
+   already in a group, the other joins it rather than starting a new one,
+   which is how trisets get made. Round counts are reconciled UP: raising
+   the shorter move is safer than silently dropping a planned set. Returns
+   what changed so the caller can say so inline. */
+function linkSuperset(list, idA, idB) {
+  const a = list.find((e) => e.id === idA);
+  const b = list.find((e) => e.id === idB);
+  if (!a || !b || a === b) return { id: null, raised: [] };
+  const id = a.supersetId || b.supersetId || `ss-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  /* Merge whole groups, not just the two exercises tapped: moving B alone
+     would strand its former partners in a half group. */
+  const merging = new Set([a.supersetId, b.supersetId].filter(Boolean));
+  for (const e of list) {
+    if (e === a || e === b || (e.supersetId && merging.has(e.supersetId))) e.supersetId = id;
+  }
+  const members = list.filter((e) => e.supersetId === id);
+  const rounds = supersetRounds(members);
+  const raised = [];
+  for (const m of members) {
+    const from = m.targetSets ?? 3;
+    if (from !== rounds) {
+      raised.push({ name: m.name, from, to: rounds });
+      m.targetSets = rounds;
+    }
+  }
+  return { id, raised };
+}
+
+/* Break a group apart. Planned set counts stay where they are — the user
+   chose those numbers, even if the group reconciled them. */
+function unlinkSuperset(list, supersetId) {
+  for (const e of list) {
+    if (e.supersetId === supersetId) delete e.supersetId;
+  }
+}
+
+/* The group's rounds stepper. Rounds live in targetSets, so this writes
+   every member and nothing else. */
+function setSupersetRounds(list, supersetId, rounds) {
+  const n = Math.max(1, rounds);
+  for (const e of list) {
+    if (e.supersetId === supersetId) e.targetSets = n;
+  }
+}
+
+/* Move a whole group — a superset, or a lone exercise — one slot within its
+   day. `key` is a supersetId or an exercise id.
+
+   Day scoping matters: mutListFor(d, day) returns the WHOLE cross-day
+   d.exercises array in normal mode, and only that day's plan in deload
+   mode. Filtering by e.day handles both, and only the slots this day
+   already occupies get rewritten, so other days stay exactly where they
+   are. Moving by group also means a loose exercise can never be dropped
+   into the middle of a superset. */
+function moveExerciseGroup(list, day, key, dir) {
+  const slots = [];
+  list.forEach((e, i) => { if (e.day === day) slots.push(i); });
+  const groups = groupedExercises(slots.map((i) => list[i]));
+  const keyOf = (g) => (g.kind === "superset" ? g.id : g.ex.id);
+  const at = groups.findIndex((g) => keyOf(g) === key);
+  if (at < 0) return;
+  const to = at + dir;
+  if (to < 0 || to >= groups.length) return;
+  [groups[at], groups[to]] = [groups[to], groups[at]];
+  const flat = [];
+  for (const g of groups) {
+    if (g.kind === "single") flat.push(g.ex);
+    else flat.push(...g.members);
+  }
+  slots.forEach((slot, n) => { list[slot] = flat[n]; });
+}
+
 /* Archive the live cycle on rollover. Runs while the OLD cycleStart is
    still in effect, so deloadWeeks are still the right indices. */
 function archiveCurrentCycle(d, endIso) {
@@ -853,17 +962,21 @@ function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
 /* ------------------------------------------------------------------ */
 /* Exercise card (Today view)                                          */
 /* ------------------------------------------------------------------ */
-function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
-  /* The array this card's exercise actually lives in. Deload plan entries
-     keep the program's ids, so writing to d.exercises during a deload week
-     would mutate the real program instead of the plan. */
+/* Everything an exercise's log entry needs, independent of how it is laid
+   out. ExerciseCard renders one of these; SupersetCard renders one per
+   member of a group. Lifted wholesale out of ExerciseCard — the logic is
+   unchanged, it just has two callers now.
+
+   NOT a hook, despite what it derives — it deliberately contains NO useState/
+   useEffect/useRef/useMemo, which is the only reason SupersetCard can call it
+   once per member inside members.map(). Adding a hook here would produce a
+   variable-length hook list under a stable React key and crash the card.
+   Keep it hook-free. */
+function exerciseEntry(data, update, ex, sessionKey, isDeload) {
+  /* The array this exercise actually lives in. Deload plan entries keep the
+     program's ids, so writing to d.exercises during a deload week would
+     mutate the real program instead of the plan. */
   const exHome = (d) => (isDeload ? ((d.deloadPlan || {})[ex.day] || d.exercises) : d.exercises);
-  const [open, setOpen] = useState(false);
-  const [addingMachine, setAddingMachine] = useState(false);
-  const [machineName, setMachineName] = useState("");
-  const [swapping, setSwapping] = useState(false);
-  const [swapText, setSwapText] = useState("");
-  const [removeArm, setRemoveArm] = useState(null);
 
   const session = data.sessions[sessionKey];
   const sessionDate = sessionKey.split("|")[0];
@@ -889,19 +1002,6 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     return d.sessions[sessionKey].entries[ex.id];
   };
 
-  /* Baked-in sets: opening the card lays out (and heals) the planned set count */
-  useEffect(() => {
-    if (!open) return;
-    update((d) => {
-      const e = ensureEntry(d);
-      const nonExtra = e.sets.filter((s) => !s.extra);
-      const extras = e.sets.filter((s) => s.extra);
-      while (nonExtra.length < (ex.targetSets || 3)) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
-      e.sets = [...nonExtra, ...extras];
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   const changeSet = (i, ns) =>
     update((d) => {
       const e = ensureEntry(d);
@@ -924,6 +1024,9 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
       e.sets.push({ w: lastWeighted ? lastWeighted.w : "", r: "", extra: true, tag: "" });
     });
 
+  const setSkipAll = (v) => update((d) => { ensureEntry(d).skippedAll = v; });
+  const removeSetAt = (i) => update((d) => { ensureEntry(d).sets.splice(i, 1); });
+
   const todaySets = entry ? entry.sets : [];
   const skippedAll = !!(entry && entry.skippedAll);
   const hasLogged = !skippedAll && todaySets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
@@ -941,6 +1044,49 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     ? T.line
     : skippedAll ? "#565B63" : beating ? T.pos : liveDelta !== null && liveDelta < 0 ? T.neg : T.amber;
 
+  const bodyweight = lastSame && isBodyweight(lastSame.entry.sets);
+  /* Sets actually logged last time, positionally indexed — this is what a
+     set row compares against. */
+  const lastLogged = lastSame
+    ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
+    : [];
+
+  return {
+    exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
+    changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
+    hasLogged, plannedToday, exTotal, plannedFilled, exFilled, exComplete,
+    todayVol, lastVol, liveDelta, beating, stripColor, bodyweight, lastLogged,
+  };
+}
+
+function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
+  const [open, setOpen] = useState(false);
+  const [addingMachine, setAddingMachine] = useState(false);
+  const [machineName, setMachineName] = useState("");
+  const [swapping, setSwapping] = useState(false);
+  const [swapText, setSwapText] = useState("");
+  const [removeArm, setRemoveArm] = useState(null);
+
+  const {
+    exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
+    changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
+    plannedToday, exTotal, exFilled, exComplete, todayVol, lastVol,
+    liveDelta, beating, stripColor, bodyweight, lastLogged,
+  } = exerciseEntry(data, update, ex, sessionKey, isDeload);
+
+  /* Baked-in sets: opening the card lays out (and heals) the planned set count */
+  useEffect(() => {
+    if (!open) return;
+    update((d) => {
+      const e = ensureEntry(d);
+      const nonExtra = e.sets.filter((s) => !s.extra);
+      const extras = e.sets.filter((s) => s.extra);
+      while (nonExtra.length < (ex.targetSets || 3)) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
+      e.sets = [...nonExtra, ...extras];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const [burst, setBurst] = useState(null);
   const prevCompleteRef = useRef(exComplete);
   useEffect(() => {
@@ -955,8 +1101,6 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     prevCompleteRef.current = exComplete;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exComplete]);
-
-  const bodyweight = lastSame && isBodyweight(lastSame.entry.sets);
 
   return (
     <div className="ll-card" style={{ position: "relative" }}>
@@ -1108,7 +1252,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                 Skipped today — add a reason in the note below if you want.
               </div>
               <button className="ll-btn ll-btn-sm" style={{ marginTop: 8 }}
-                onClick={() => update((d) => { ensureEntry(d).skippedAll = false; })}>
+                onClick={() => setSkipAll(false)}>
                 Undo — do this exercise
               </button>
             </div>
@@ -1119,22 +1263,17 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                   <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
                 </Row>
               )}
-              {(() => {
-                const lastLogged = lastSame
-                  ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
-                  : [];
-                return todaySets.map((s, i) => (
-                  <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
-                    compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
-                    onChange={(ns) => changeSet(i, ns)}
-                    onRemove={() => update((d) => { ensureEntry(d).sets.splice(i, 1); })} />
-                ));
-              })()}
+              {todaySets.map((s, i) => (
+                <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
+                  compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
+                  onChange={(ns) => changeSet(i, ns)}
+                  onRemove={() => removeSetAt(i)} />
+              ))}
 
               <Row style={{ marginTop: 4, marginBottom: 10 }}>
                 <button className="ll-btn" style={{ flex: 1 }} onClick={addExtraSet}>+ Extra set</button>
                 <button className="ll-btn" style={{ flex: 1, color: T.muted }}
-                  onClick={() => update((d) => { ensureEntry(d).skippedAll = true; })}>
+                  onClick={() => setSkipAll(true)}>
                   Skip all sets
                 </button>
               </Row>
@@ -1177,6 +1316,243 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
               </button>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Superset card (Today view) — round-interleaved                      */
+/* ------------------------------------------------------------------ */
+/* One card for a whole group. Each round block holds one SetRow per
+   member at that round's index, in the order you actually perform them.
+   Every member keeps its own session entry, so comparisons stay per
+   exercise per machine — nothing here merges volume.
+   `initialOpen` exists so tests can render the open state. */
+function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, initialOpen }) {
+  const [open, setOpen] = useState(!!initialOpen);
+  const [detail, setDetail] = useState(null); /* member id whose extras are shown */
+  /* Swap state is a single pair scoped to whichever member's detail panel is
+     open — only one detail panel can be open at a time, so this never needs
+     to be keyed by member id; it is reset whenever the open member changes. */
+  const [swapping, setSwapping] = useState(false);
+  const [swapText, setSwapText] = useState("");
+  const members = group.members;
+  const rounds = group.rounds;
+  /* One entry controller per member, in render order. */
+  const ctl = members.map((m) => exerciseEntry(data, update, m, sessionKey, isDeload));
+
+  /* Baked-in sets: opening the card lays out (and heals) every member's
+     planned set count, mirroring ExerciseCard. */
+  useEffect(() => {
+    if (!open) return;
+    update((d) => {
+      members.forEach((m, i) => {
+        const e = ctl[i].ensureEntry(d);
+        const nonExtra = e.sets.filter((s) => !s.extra);
+        const extras = e.sets.filter((s) => s.extra);
+        while (nonExtra.length < rounds) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
+        e.sets = [...nonExtra, ...extras];
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, rounds, members.length]);
+
+  const roundDone = (r) => members.every((m, i) => {
+    /* A member skipped wholesale is done for every round — setSkipAll marks
+       the entry, never the individual sets. */
+    if (ctl[i].skippedAll) return true;
+    const s = ctl[i].plannedToday[r];
+    return s && (num(s.r) > 0 || s.skipped);
+  });
+  const nowRound = (() => {
+    for (let r = 0; r < rounds; r++) if (!roundDone(r)) return r;
+    return -1;
+  })();
+  const allDone = members.every((_, i) => ctl[i].exComplete);
+  const anyBeating = members.some((_, i) => ctl[i].beating);
+  const anyDown = members.some((_, i) => ctl[i].liveDelta !== null && ctl[i].liveDelta < 0);
+  const groupStrip = !allDone ? T.line : anyBeating && !anyDown ? T.pos : anyDown ? T.neg : T.amber;
+
+  return (
+    <div className="ll-card" style={{ position: "relative", border: `1px solid ${T.line}` }}>
+      {/* header */}
+      <div onClick={() => setOpen(!open)} style={{ padding: "13px 14px", cursor: "pointer" }}>
+        <Row style={{ justifyContent: "space-between" }}>
+          <Row style={{ gap: 9, minWidth: 0 }}>
+            <span style={{ width: 4, alignSelf: "stretch", minHeight: 20, borderRadius: 2, background: groupStrip, flex: "none", transition: "background-color 0.5s ease" }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: T.muted, marginBottom: 2 }}>
+                🔗 Superset · {rounds} rounds
+              </div>
+              <div className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>
+                {members.map((m) => m.name).join(" + ")}
+              </div>
+            </div>
+          </Row>
+          <Row style={{ gap: 8, flex: "none" }}>
+            <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>
+              {members.reduce((a, _, i) => a + ctl[i].exFilled, 0)}/{members.reduce((a, _, i) => a + ctl[i].exTotal, 0)}
+            </span>
+            <span style={{ color: T.faint, fontSize: 13 }}>{open ? "▾" : "▸"}</span>
+          </Row>
+        </Row>
+        {/* per-member summary stays visible collapsed — a superset is still
+            two exercises with their own histories */}
+        <div style={{ marginTop: 7, marginLeft: 13 }}>
+          {members.map((m, i) => (
+            <Row key={m.id} style={{ justifyContent: "space-between", marginTop: 3 }}>
+              <span style={{ color: T.muted, fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {m.icon ? m.icon + " " : ""}{m.name}
+                {ctl[i].lastSame ? <span style={{ color: T.faint }}> · last {setsLine(ctl[i].lastSame.entry.sets)}</span> : null}
+              </span>
+              <Row style={{ gap: 7, flex: "none" }}>
+                <span className="ll-num" style={{ color: T.faint, fontSize: 11.5 }}>{ctl[i].exFilled}/{ctl[i].exTotal}</span>
+                {!data.hideDeltas && ctl[i].exComplete && ctl[i].liveDelta !== null && <Delta value={ctl[i].liveDelta} />}
+              </Row>
+            </Row>
+          ))}
+        </div>
+      </div>
+
+      {open && (
+        <div className="ll-fade" style={{ padding: "0 14px 14px", borderTop: `1px solid ${T.line}` }}>
+          <Row style={{ justifyContent: "center", gap: 6, margin: "10px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
+            <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+          </Row>
+
+          {/* rounds — a continuous rail runs the full height of this region,
+              spanning every round, so the members read as one thing. It is
+              purely decorative chrome (neutral T.line); the semantic verdict
+              lives in each member row's own notch below. */}
+          <div style={{ position: "relative", paddingLeft: 11 }}>
+            <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: T.line }} />
+            {Array.from({ length: rounds }, (_, r) => (
+              <div key={r} style={{ borderTop: r === 0 ? "none" : `1px dashed ${T.line}`, paddingTop: r === 0 ? 0 : 9, marginBottom: 6 }}>
+                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6, color: r === nowRound ? T.blue : T.faint, fontWeight: r === nowRound ? 700 : 400 }}>
+                  Round {r + 1}{roundDone(r) ? " ✓" : r === nowRound ? " — now" : ""}
+                </div>
+                {members.map((m, i) => {
+                  if (ctl[i].skippedAll) {
+                    return (
+                      <div key={m.id} style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9, marginBottom: 4, opacity: 0.5 }}>
+                        <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
+                          {m.icon ? m.icon + " " : ""}{m.name}
+                        </div>
+                        <div style={{ fontSize: 13, color: T.faint }}>— skipped today</div>
+                      </div>
+                    );
+                  }
+                  const s = ctl[i].todaySets.filter((x) => !x.extra)[r];
+                  if (!s) return null;
+                  const absIdx = ctl[i].todaySets.indexOf(s);
+                  return (
+                    <div key={m.id} style={{ borderLeft: `2px solid ${ctl[i].stripColor}`, paddingLeft: 9, marginBottom: 4 }}>
+                      <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
+                        {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
+                      </div>
+                      <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal}
+                        compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
+                        onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
+                        onRemove={() => ctl[i].removeSetAt(absIdx)} />
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          {/* extras sit outside the planned rounds, so they render as solo tails */}
+          {members.map((m, i) => ctl[i].todaySets.map((s, absIdx) => (s.extra ? (
+            <div key={`${m.id}-x-${absIdx}`} style={{ borderTop: `1px dashed ${T.line}`, paddingTop: 9, marginBottom: 6 }}>
+              <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.07em", color: T.amber, marginBottom: 6 }}>
+                Extra · {m.name} only
+              </div>
+              <div style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9 }}>
+                <SetRow idx={absIdx} set={s} unit={data.unit} repGoal={m.repGoal} compareSet={undefined}
+                  onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
+                  onRemove={() => ctl[i].removeSetAt(absIdx)} />
+              </div>
+            </div>
+          ) : null)))}
+
+          {/* per-member extras behind a disclosure each */}
+          <Row style={{ gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+            {members.map((m) => (
+              <button key={m.id} className="ll-btn ll-btn-sm"
+                onClick={() => { setDetail(detail === m.id ? null : m.id); setSwapping(false); setSwapText(""); }}
+                aria-expanded={detail === m.id}>
+                {m.name} ⋯
+              </button>
+            ))}
+          </Row>
+
+          {members.map((m, i) => (detail === m.id ? (
+            <div key={`d-${m.id}`} className="ll-fade" style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", marginTop: 9 }}>
+              <div style={{ color: T.muted, fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 7 }}>
+                {m.name}
+              </div>
+              {ctl[i].lastSame ? (
+                <div className="ll-num" style={{ fontSize: 14.5, marginBottom: 8 }}>
+                  Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets)}
+                </div>
+              ) : (
+                <div style={{ color: T.faint, fontSize: 12.5, marginBottom: 8 }}>
+                  No history on {ctl[i].variant.name}.
+                </div>
+              )}
+              {/* machine picker */}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 9 }}>
+                {m.variants.map((v, vi) => (
+                  <button key={v.id} className={`ll-chip ${v.id === ctl[i].variantId ? "on" : ""}`}
+                    onClick={() => update((d) => {
+                      const dex = ctl[i].exHome(d).find((x) => x.id === m.id);
+                      dex.activeVariant = v.id;
+                      const s = d.sessions[sessionKey];
+                      if (s && s.entries[m.id]) s.entries[m.id].variantId = v.id;
+                    })}>
+                    <VariantDot index={vi} /> {v.name}
+                  </button>
+                ))}
+              </div>
+              <Row style={{ gap: 6, flexWrap: "wrap" }}>
+                <button className="ll-btn ll-btn-sm" onClick={ctl[i].addExtraSet}>+ Extra set</button>
+                <button className="ll-btn ll-btn-sm" style={{ color: T.muted }}
+                  onClick={() => ctl[i].setSkipAll(!ctl[i].skippedAll)}>
+                  {ctl[i].skippedAll ? "Undo skip" : "Skip all sets"}
+                </button>
+              </Row>
+              <input className="ll-input" style={{ marginTop: 9, fontSize: 13 }}
+                placeholder={`Note for ${m.name}…`} value={(ctl[i].entry && ctl[i].entry.note) || ""}
+                onChange={(e) => update((d) => { ctl[i].ensureEntry(d).note = e.target.value; })} />
+
+              {/* swap exercise — mirrors ExerciseCard's swap block, scoped to
+                  this member's own entry so a pre-existing swap set before
+                  linking can be cleared without unlinking the whole group */}
+              <div style={{ marginTop: 10 }}>
+                {swapping ? (
+                  <Row>
+                    <input className="ll-input" autoFocus placeholder="What are you doing instead?" value={swapText}
+                      onChange={(e) => setSwapText(e.target.value)} />
+                    <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                      update((d) => { ctl[i].ensureEntry(d).swapName = swapText.trim(); });
+                      setSwapping(false);
+                    }}>Set</button>
+                  </Row>
+                ) : ctl[i].entry && ctl[i].entry.swapName ? (
+                  <button className="ll-btn ll-btn-sm" onClick={() => update((d) => { ctl[i].ensureEntry(d).swapName = ""; })}>
+                    Undo swap (back to {m.name})
+                  </button>
+                ) : (
+                  <button style={{ background: "none", border: "none", color: T.faint, fontSize: 13, cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                    onClick={() => { setSwapText(""); setSwapping(true); }}>
+                    ⇄ Swap exercise for today
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : null))}
         </div>
       )}
     </div>
@@ -1559,9 +1935,11 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
           ▶ Start Workout
         </button>
       )}
-      {exList.map((ex) => (
-        <ExerciseCard key={ex.id} data={data} update={update} ex={ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
-      ))}
+      {groupedExercises(exList).map((g) => (g.kind === "superset" ? (
+        <SupersetCard key={g.id} data={data} update={update} group={g} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
+      ) : (
+        <ExerciseCard key={g.ex.id} data={data} update={update} ex={g.ex} sessionKey={sessionKey} dayColor={DAY_COLOR[day]} isDeload={isDeload} />
+      )))}
       {exList.length > 0 && weekOffset === 0 && (() => {
         const done = !!(sess && sess.celebrated);
         const ready = complete && !done;
@@ -2560,6 +2938,62 @@ function ManageView({ data, update, reseed, restore }) {
     else d.exercises = d.exercises.filter((x) => x.id !== id);
   };
 
+  const [linkNote, setLinkNote] = useState(null); /* { day, text } | null */
+  const doLink = (day, idA, idB) =>
+    update((d) => {
+      const res = linkSuperset(mutListFor(d, day), idA, idB);
+      setLinkNote(res.raised.length
+        ? { day, text: res.raised.map((r) => `${r.name} raised ${r.from} → ${r.to} rounds to match.`).join(" ") }
+        : null);
+    });
+
+  /* Deliberately a function that returns JSX, NOT a nested component. A
+     component declared during render gets a fresh identity every render, so
+     React would unmount and remount this subtree on each keystroke and the
+     name field's autoFocus would steal the caret mid-edit. A direct call has
+     no component boundary and no remount. */
+  const singleExerciseRow = (ex, day, gi, garr) => (
+    <Row key={ex.id} style={{ justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
+      {editing === ex.id ? (
+        <div style={{ flex: 1 }}>
+          <Row>
+            <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
+              value={ex.icon || ""} onChange={(e) => update((d) => { findEx(d, day, ex.id).icon = e.target.value; })} />
+            <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
+            <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+              const t = editText.trim();
+              if (t) update((d) => { findEx(d, day, ex.id).name = t; });
+              setEditing(null);
+            }}>Done</button>
+          </Row>
+          <Row style={{ marginTop: 6, gap: 8 }}>
+            <span style={{ color: T.muted, fontSize: 13 }}>Planned sets:</span>
+            <button className="ll-btn ll-btn-sm" onClick={() =>
+              update((d) => { const x = findEx(d, day, ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
+            <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{ex.targetSets || 3}</span>
+            <button className="ll-btn ll-btn-sm" onClick={() =>
+              update((d) => { const x = findEx(d, day, ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
+          </Row>
+        </div>
+      ) : (
+        <>
+          <span style={{ fontSize: 15 }}>
+            {ex.icon ? ex.icon + " " : ""}{ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
+          </span>
+          <Row style={{ gap: 4 }}>
+            <button className="ll-btn ll-btn-sm" disabled={gi === 0} style={{ opacity: gi === 0 ? 0.35 : 1 }}
+              onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, ex.id, -1); })}>↑</button>
+            <button className="ll-btn ll-btn-sm" disabled={gi === garr.length - 1} style={{ opacity: gi === garr.length - 1 ? 0.35 : 1 }}
+              onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, ex.id, 1); })}>↓</button>
+            <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(ex.id); setEditText(ex.name); }}>✎</button>
+            <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+              onClick={() => update((d) => { removeEx(d, day, ex.id); })}>✕</button>
+          </Row>
+        </>
+      )}
+    </Row>
+  );
+
   const weekNum = Math.max(1, Math.floor((new Date(todayISO()) - new Date(data.cycleStart)) / (7 * 864e5)) + 1);
 
   const startNewCycle = () =>
@@ -2858,57 +3292,94 @@ function ManageView({ data, update, reseed, restore }) {
             <span style={{ width: 10, height: 10, borderRadius: 5, background: DAY_COLOR[day] }} />
             <span className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>{day}</span>
           </Row>
-          {listFor(day).map((ex, i, arr) => (
-            <Row key={ex.id} style={{ justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
-              {editing === ex.id ? (
-                <div style={{ flex: 1 }}>
-                  <Row>
-                    <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
-                      value={ex.icon || ""} onChange={(e) => update((d) => { findEx(d, day, ex.id).icon = e.target.value; })} />
-                    <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
-                    <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
-                      const t = editText.trim();
-                      if (t) update((d) => { findEx(d, day, ex.id).name = t; });
-                      setEditing(null);
-                    }}>Done</button>
+          {groupedExercises(listFor(day)).map((g, gi, garr) => {
+            const prevGroup = garr[gi - 1];
+            /* link pill sits in the gap ABOVE this group, joining it to the
+               group above — so there is one pill per adjacent pair */
+            const linkA = prevGroup && (prevGroup.kind === "single" ? prevGroup.ex : prevGroup.members[prevGroup.members.length - 1]);
+            const linkB = g.kind === "single" ? g.ex : g.members[0];
+            const canLink = !!linkA && !(linkA.supersetId && linkA.supersetId === linkB.supersetId);
+            return (
+              <div key={g.kind === "superset" ? g.id : g.ex.id}>
+                {canLink && (
+                  <Row style={{ justifyContent: "center", margin: "-6px 0", position: "relative", zIndex: 2 }}>
+                    <button
+                      aria-label={`Link ${linkA.name} with ${linkB.name} as a superset`}
+                      onClick={() => doLink(day, linkA.id, linkB.id)}
+                      style={{
+                        background: T.surface, border: `1px dashed ${T.line}`, color: T.faint,
+                        borderRadius: 999, fontSize: 10, padding: "2px 10px", letterSpacing: "0.06em",
+                        cursor: "pointer", fontFamily: "inherit",
+                      }}>
+                      🔗 link
+                    </button>
                   </Row>
-                  <Row style={{ marginTop: 6, gap: 8 }}>
-                    <span style={{ color: T.muted, fontSize: 13 }}>Planned sets:</span>
-                    <button className="ll-btn ll-btn-sm" onClick={() =>
-                      update((d) => { const x = findEx(d, day, ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
-                    <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{ex.targetSets || 3}</span>
-                    <button className="ll-btn ll-btn-sm" onClick={() =>
-                      update((d) => { const x = findEx(d, day, ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
-                  </Row>
-                </div>
-              ) : (
-                <>
-                  <span style={{ fontSize: 15 }}>
-                    {ex.icon ? ex.icon + " " : ""}{ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
-                  </span>
-                  <Row style={{ gap: 4 }}>
-                    <button className="ll-btn ll-btn-sm" disabled={i === 0} style={{ opacity: i === 0 ? 0.35 : 1 }}
-                      onClick={() => update((d) => {
-                        const list = mutListFor(d, day);
-                        const idxA = list.findIndex((x) => x.id === ex.id);
-                        const idxB = list.findIndex((x) => x.id === arr[i - 1].id);
-                        [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
-                      })}>↑</button>
-                    <button className="ll-btn ll-btn-sm" disabled={i === arr.length - 1} style={{ opacity: i === arr.length - 1 ? 0.35 : 1 }}
-                      onClick={() => update((d) => {
-                        const list = mutListFor(d, day);
-                        const idxA = list.findIndex((x) => x.id === ex.id);
-                        const idxB = list.findIndex((x) => x.id === arr[i + 1].id);
-                        [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
-                      })}>↓</button>
-                    <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(ex.id); setEditText(ex.name); }}>✎</button>
-                    <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
-                      onClick={() => update((d) => { removeEx(d, day, ex.id); })}>✕</button>
-                  </Row>
-                </>
-              )}
-            </Row>
-          ))}
+                )}
+                {g.kind === "superset" ? (
+                  <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: "7px 9px", margin: "8px 0", background: T.surface2 }}>
+                    <Row style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: T.muted }}>
+                        🔗 Superset
+                      </span>
+                      <Row style={{ gap: 4 }}>
+                        <button className="ll-btn ll-btn-sm" aria-label="Remove a round"
+                          onClick={() => update((d) => { setSupersetRounds(mutListFor(d, day), g.id, g.rounds - 1); })}>−</button>
+                        <span className="ll-num" style={{ fontSize: 13, fontWeight: 700 }}>{g.rounds} rounds</span>
+                        <button className="ll-btn ll-btn-sm" aria-label="Add a round"
+                          onClick={() => update((d) => { setSupersetRounds(mutListFor(d, day), g.id, g.rounds + 1); })}>+</button>
+                        <button className="ll-btn ll-btn-sm" aria-label="Move superset up" disabled={gi === 0} style={{ opacity: gi === 0 ? 0.35 : 1 }}
+                          onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, -1); })}>↑</button>
+                        <button className="ll-btn ll-btn-sm" aria-label="Move superset down" disabled={gi === garr.length - 1} style={{ opacity: gi === garr.length - 1 ? 0.35 : 1 }}
+                          onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, 1); })}>↓</button>
+                        <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+                          onClick={() => { update((d) => { unlinkSuperset(mutListFor(d, day), g.id); }); setLinkNote(null); }}>unlink</button>
+                      </Row>
+                    </Row>
+                    {g.members.map((m) => (
+                      <Row key={m.id} style={{ justifyContent: "space-between", padding: "5px 0" }}>
+                        {editing === m.id ? (
+                          <div style={{ flex: 1 }}>
+                            <Row>
+                              <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
+                                value={m.icon || ""} onChange={(e) => update((d) => { findEx(d, day, m.id).icon = e.target.value; })} />
+                              <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
+                              <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                                const t = editText.trim();
+                                if (t) update((d) => { findEx(d, day, m.id).name = t; });
+                                setEditing(null);
+                              }}>Done</button>
+                            </Row>
+                          </div>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 14.5 }}>{m.icon ? m.icon + " " : ""}{m.name}</span>
+                            <Row style={{ gap: 4 }}>
+                              <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(m.id); setEditText(m.name); }}>✎</button>
+                              <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+                                onClick={() => update((d) => {
+                                  removeEx(d, day, m.id);
+                                  /* Deleting one half of a pair leaves the survivor
+                                     carrying a supersetId no one else shares — clear
+                                     it so "never a superset" and "was a superset" stay
+                                     distinguishable in the raw blob. */
+                                  const remaining = mutListFor(d, day).filter((x) => x.supersetId === g.id);
+                                  if (remaining.length < 2) remaining.forEach((x) => delete x.supersetId);
+                                })}>✕</button>
+                            </Row>
+                          </>
+                        )}
+                      </Row>
+                    ))}
+                  </div>
+                ) : (
+                  /* unchanged single-exercise row — see the note below: this is
+                     a plain function call, NOT a nested component */
+                  singleExerciseRow(g.ex, day, gi, garr)
+                )}
+              </div>
+            );
+          })}
+          {linkNote && linkNote.day === day && <div style={{ color: T.muted, fontSize: 12, marginTop: 6 }}>{linkNote.text}</div>}
           <Row style={{ marginTop: 10 }}>
             <input className="ll-input" placeholder="Add exercise…" value={newNames[day] || ""}
               onChange={(e) => setNewNames({ ...newNames, [day]: e.target.value })} />
