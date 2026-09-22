@@ -59,6 +59,20 @@ const blob = {
     if (!el) return false; el.click(); return true;
   }, sel, idx);
   const stored = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k)), KEY);
+  /* The app debounces localStorage writes (scheduleSave, 800ms) behind
+     setData. A fixed sleep race the debounce on a loaded machine — poll for
+     the expected shape instead, with a generous ceiling. On timeout this
+     still returns the last value read, so the assertion reports what was
+     actually there rather than hanging. */
+  const storedUntil = async (pred, timeout = 5000) => {
+    const t0 = Date.now();
+    for (;;) {
+      const d = await stored();
+      if (d && pred(d)) return d;
+      if (Date.now() - t0 > timeout) return d;
+      await wait(100);
+    }
+  };
 
   console.log(`\n== ${FILE} · superset link / log / unlink ==`);
 
@@ -66,25 +80,27 @@ const blob = {
   ok("Manage opens", await clickText("Manage")); await wait(600);
   ok("link pill present between the two exercises",
      await page.evaluate(() => !!document.querySelector('button[aria-label^="Link"]')));
-  ok("clicked the link pill", await clickSel('button[aria-label^="Link"]')); await wait(950);
+  ok("clicked the link pill", await clickSel('button[aria-label^="Link"]'));
 
-  let d = await stored();
+  let d = await storedUntil((d) => d.exercises[0].supersetId && d.exercises[0].supersetId === d.exercises[1].supersetId);
   const ids = d.exercises.map((e) => e.supersetId);
   ok("both exercises share a supersetId", !!ids[0] && ids[0] === ids[1], `-> ${JSON.stringify(ids)}`);
   ok("rounds reconciled upward to 4", d.exercises.map((e) => e.targetSets).join() === "4,4",
      `-> ${d.exercises.map((e) => e.targetSets).join()}`);
   ok("inline notice names what was raised", /raised/i.test(await txt()));
+  const raisedCount = await page.evaluate(() => (document.body.innerText.match(/rounds to match\./g) || []).length);
+  ok("raised-notice appears exactly once, not once per day card", raisedCount === 1, `-> ${raisedCount}`);
   ok("group block shows the superset tag", /SUPERSET/i.test(await txt()));
   ok("group shows one rounds control", /4 rounds/i.test(await txt()));
 
   /* ---- Manage: rounds stepper writes both members ---- */
   ok("rounds stepper present", await page.evaluate(() => !!document.querySelector('button[aria-label="Add a round"]')));
-  await clickSel('button[aria-label="Add a round"]'); await wait(950);
-  d = await stored();
+  await clickSel('button[aria-label="Add a round"]');
+  d = await storedUntil((d) => d.exercises.every((e) => e.targetSets === 5));
   ok("rounds stepper wrote every member", d.exercises.map((e) => e.targetSets).join() === "5,5",
      `-> ${d.exercises.map((e) => e.targetSets).join()}`);
-  await clickSel('button[aria-label="Remove a round"]'); await wait(950);
-  d = await stored();
+  await clickSel('button[aria-label="Remove a round"]');
+  d = await storedUntil((d) => d.exercises.every((e) => e.targetSets === 4));
   ok("rounds stepper decrements every member", d.exercises.map((e) => e.targetSets).join() === "4,4");
 
   /* ---- Log: the group renders as one card ---- */
@@ -110,9 +126,14 @@ const blob = {
   }, idx, w, r);
 
   await fill(0, "100", "10"); await wait(500);
-  await fill(1, "50", "12"); await wait(950);
+  await fill(1, "50", "12");
 
-  d = await stored();
+  d = await storedUntil((d) => {
+    const k = Object.keys(d.sessions)[0];
+    const e = k && d.sessions[k].entries;
+    return !!(e && e.press && e.curl && e.press.sets[0] && String(e.press.sets[0].r) === "10"
+      && e.curl.sets[0] && String(e.curl.sets[0].r) === "12");
+  });
   const key = Object.keys(d.sessions)[0];
   const e = d.sessions[key].entries;
   ok("both members got their own entry", !!e.press && !!e.curl, `-> ${Object.keys(e).join()}`);
@@ -126,15 +147,18 @@ const blob = {
 
   /* ---- Manage: unlink ---- */
   ok("Manage reopens", await clickText("Manage")); await wait(700);
-  ok("unlink control present", await clickText("unlink")); await wait(950);
-  d = await stored();
+  ok("unlink control present", await clickText("unlink"));
+  d = await storedUntil((d) => d.exercises.every((x) => !x.supersetId));
   ok("supersetId cleared from both", d.exercises.every((x) => !x.supersetId));
   ok("planned sets survive the unlink", d.exercises.map((x) => x.targetSets).join() === "4,4");
+  const pressAfterUnlink = d.sessions[Object.keys(d.sessions)[0]].entries.press;
+  ok("logged sets survive the unlink",
+     String(pressAfterUnlink.sets[0].w) === "100" && String(pressAfterUnlink.sets[0].r) === "10",
+     `-> ${JSON.stringify(pressAfterUnlink.sets[0])}`);
 
   ok("Log shows two separate cards again", await clickText("Log")); await wait(700);
   const t2 = await txt();
   ok("superset tag gone", !/SUPERSET/i.test(t2));
-  ok("logged sets survive the unlink", /100/.test(t2) || /Leg Press/.test(t2));
 
   ok("no page errors across the run", errors.length === 0, errors[0] ? `-> ${errors[0].slice(0, 120)}` : "");
 

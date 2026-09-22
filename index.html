@@ -2989,13 +2989,13 @@ function ManageView({ data, update, reseed, restore }) {
     else d.exercises = d.exercises.filter((x) => x.id !== id);
   };
 
-  const [linkNote, setLinkNote] = useState("");
+  const [linkNote, setLinkNote] = useState(null); /* { day, text } | null */
   const doLink = (day, idA, idB) =>
     update((d) => {
       const res = linkSuperset(mutListFor(d, day), idA, idB);
       setLinkNote(res.raised.length
-        ? res.raised.map((r) => `${r.name} raised ${r.from} → ${r.to} rounds to match.`).join(" ")
-        : "");
+        ? { day, text: res.raised.map((r) => `${r.name} raised ${r.from} → ${r.to} rounds to match.`).join(" ") }
+        : null);
     });
 
   /* Deliberately a function that returns JSX, NOT a nested component. A
@@ -3383,17 +3383,34 @@ function ManageView({ data, update, reseed, restore }) {
                         <button className="ll-btn ll-btn-sm" aria-label="Move superset down"
                           onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, 1); })}>↓</button>
                         <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
-                          onClick={() => { update((d) => { unlinkSuperset(mutListFor(d, day), g.id); }); setLinkNote(""); }}>unlink</button>
+                          onClick={() => { update((d) => { unlinkSuperset(mutListFor(d, day), g.id); }); setLinkNote(null); }}>unlink</button>
                       </Row>
                     </Row>
                     {g.members.map((m) => (
                       <Row key={m.id} style={{ justifyContent: "space-between", padding: "5px 0" }}>
-                        <span style={{ fontSize: 14.5 }}>{m.icon ? m.icon + " " : ""}{m.name}</span>
-                        <Row style={{ gap: 4 }}>
-                          <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(m.id); setEditText(m.name); }}>✎</button>
-                          <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
-                            onClick={() => update((d) => { removeEx(d, day, m.id); })}>✕</button>
-                        </Row>
+                        {editing === m.id ? (
+                          <div style={{ flex: 1 }}>
+                            <Row>
+                              <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
+                                value={m.icon || ""} onChange={(e) => update((d) => { findEx(d, day, m.id).icon = e.target.value; })} />
+                              <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
+                              <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+                                const t = editText.trim();
+                                if (t) update((d) => { findEx(d, day, m.id).name = t; });
+                                setEditing(null);
+                              }}>Done</button>
+                            </Row>
+                          </div>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 14.5 }}>{m.icon ? m.icon + " " : ""}{m.name}</span>
+                            <Row style={{ gap: 4 }}>
+                              <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(m.id); setEditText(m.name); }}>✎</button>
+                              <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+                                onClick={() => update((d) => { removeEx(d, day, m.id); })}>✕</button>
+                            </Row>
+                          </>
+                        )}
                       </Row>
                     ))}
                   </div>
@@ -3405,7 +3422,7 @@ function ManageView({ data, update, reseed, restore }) {
               </div>
             );
           })}
-          {linkNote && <div style={{ color: T.muted, fontSize: 12, marginTop: 6 }}>{linkNote}</div>}
+          {linkNote && linkNote.day === day && <div style={{ color: T.muted, fontSize: 12, marginTop: 6 }}>{linkNote.text}</div>}
           <Row style={{ marginTop: 10 }}>
             <input className="ll-input" placeholder="Add exercise…" value={newNames[day] || ""}
               onChange={(e) => setNewNames({ ...newNames, [day]: e.target.value })} />
