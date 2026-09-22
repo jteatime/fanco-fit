@@ -2896,6 +2896,62 @@ function ManageView({ data, update, reseed, restore }) {
     else d.exercises = d.exercises.filter((x) => x.id !== id);
   };
 
+  const [linkNote, setLinkNote] = useState("");
+  const doLink = (day, idA, idB) =>
+    update((d) => {
+      const res = linkSuperset(mutListFor(d, day), idA, idB);
+      setLinkNote(res.raised.length
+        ? res.raised.map((r) => `${r.name} raised ${r.from} → ${r.to} rounds to match.`).join(" ")
+        : "");
+    });
+
+  /* Deliberately a function that returns JSX, NOT a nested component. A
+     component declared during render gets a fresh identity every render, so
+     React would unmount and remount this subtree on each keystroke and the
+     name field's autoFocus would steal the caret mid-edit. A direct call has
+     no component boundary and no remount. */
+  const singleExerciseRow = (ex, day, gi, garr) => (
+    <Row key={ex.id} style={{ justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
+      {editing === ex.id ? (
+        <div style={{ flex: 1 }}>
+          <Row>
+            <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
+              value={ex.icon || ""} onChange={(e) => update((d) => { findEx(d, day, ex.id).icon = e.target.value; })} />
+            <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
+            <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
+              const t = editText.trim();
+              if (t) update((d) => { findEx(d, day, ex.id).name = t; });
+              setEditing(null);
+            }}>Done</button>
+          </Row>
+          <Row style={{ marginTop: 6, gap: 8 }}>
+            <span style={{ color: T.muted, fontSize: 13 }}>Planned sets:</span>
+            <button className="ll-btn ll-btn-sm" onClick={() =>
+              update((d) => { const x = findEx(d, day, ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
+            <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{ex.targetSets || 3}</span>
+            <button className="ll-btn ll-btn-sm" onClick={() =>
+              update((d) => { const x = findEx(d, day, ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
+          </Row>
+        </div>
+      ) : (
+        <>
+          <span style={{ fontSize: 15 }}>
+            {ex.icon ? ex.icon + " " : ""}{ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
+          </span>
+          <Row style={{ gap: 4 }}>
+            <button className="ll-btn ll-btn-sm" disabled={gi === 0} style={{ opacity: gi === 0 ? 0.35 : 1 }}
+              onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, ex.id, -1); })}>↑</button>
+            <button className="ll-btn ll-btn-sm" disabled={gi === garr.length - 1} style={{ opacity: gi === garr.length - 1 ? 0.35 : 1 }}
+              onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, ex.id, 1); })}>↓</button>
+            <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(ex.id); setEditText(ex.name); }}>✎</button>
+            <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+              onClick={() => update((d) => { removeEx(d, day, ex.id); })}>✕</button>
+          </Row>
+        </>
+      )}
+    </Row>
+  );
+
   const weekNum = Math.max(1, Math.floor((new Date(todayISO()) - new Date(data.cycleStart)) / (7 * 864e5)) + 1);
 
   const startNewCycle = () =>
@@ -3194,57 +3250,69 @@ function ManageView({ data, update, reseed, restore }) {
             <span style={{ width: 10, height: 10, borderRadius: 5, background: DAY_COLOR[day] }} />
             <span className="ll-display" style={{ fontSize: 18, fontWeight: 600 }}>{day}</span>
           </Row>
-          {listFor(day).map((ex, i, arr) => (
-            <Row key={ex.id} style={{ justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
-              {editing === ex.id ? (
-                <div style={{ flex: 1 }}>
-                  <Row>
-                    <input className="ll-input" style={{ width: 58, flex: "none", textAlign: "center" }} placeholder="🏋️" maxLength={4}
-                      value={ex.icon || ""} onChange={(e) => update((d) => { findEx(d, day, ex.id).icon = e.target.value; })} />
-                    <input className="ll-input" autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} />
-                    <button className="ll-btn ll-btn-sm ll-btn-chalk" onClick={() => {
-                      const t = editText.trim();
-                      if (t) update((d) => { findEx(d, day, ex.id).name = t; });
-                      setEditing(null);
-                    }}>Done</button>
+          {groupedExercises(listFor(day)).map((g, gi, garr) => {
+            const prevGroup = garr[gi - 1];
+            /* link pill sits in the gap ABOVE this group, joining it to the
+               group above — so there is one pill per adjacent pair */
+            const linkA = prevGroup && (prevGroup.kind === "single" ? prevGroup.ex : prevGroup.members[prevGroup.members.length - 1]);
+            const linkB = g.kind === "single" ? g.ex : g.members[0];
+            const canLink = !!linkA && !(linkA.supersetId && linkA.supersetId === linkB.supersetId);
+            return (
+              <div key={g.kind === "superset" ? g.id : g.ex.id}>
+                {canLink && (
+                  <Row style={{ justifyContent: "center", margin: "-6px 0", position: "relative", zIndex: 2 }}>
+                    <button
+                      aria-label={`Link ${linkA.name} with ${linkB.name} as a superset`}
+                      onClick={() => doLink(day, linkA.id, linkB.id)}
+                      style={{
+                        background: T.surface, border: `1px dashed ${T.line}`, color: T.faint,
+                        borderRadius: 999, fontSize: 10, padding: "2px 10px", letterSpacing: "0.06em",
+                        cursor: "pointer", fontFamily: "inherit",
+                      }}>
+                      🔗 link
+                    </button>
                   </Row>
-                  <Row style={{ marginTop: 6, gap: 8 }}>
-                    <span style={{ color: T.muted, fontSize: 13 }}>Planned sets:</span>
-                    <button className="ll-btn ll-btn-sm" onClick={() =>
-                      update((d) => { const x = findEx(d, day, ex.id); x.targetSets = Math.max(1, (x.targetSets || 3) - 1); })}>−</button>
-                    <span className="ll-num" style={{ fontSize: 15, fontWeight: 700 }}>{ex.targetSets || 3}</span>
-                    <button className="ll-btn ll-btn-sm" onClick={() =>
-                      update((d) => { const x = findEx(d, day, ex.id); x.targetSets = (x.targetSets || 3) + 1; })}>+</button>
-                  </Row>
-                </div>
-              ) : (
-                <>
-                  <span style={{ fontSize: 15 }}>
-                    {ex.icon ? ex.icon + " " : ""}{ex.name} <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>· {ex.targetSets || 3} sets</span>
-                  </span>
-                  <Row style={{ gap: 4 }}>
-                    <button className="ll-btn ll-btn-sm" disabled={i === 0} style={{ opacity: i === 0 ? 0.35 : 1 }}
-                      onClick={() => update((d) => {
-                        const list = mutListFor(d, day);
-                        const idxA = list.findIndex((x) => x.id === ex.id);
-                        const idxB = list.findIndex((x) => x.id === arr[i - 1].id);
-                        [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
-                      })}>↑</button>
-                    <button className="ll-btn ll-btn-sm" disabled={i === arr.length - 1} style={{ opacity: i === arr.length - 1 ? 0.35 : 1 }}
-                      onClick={() => update((d) => {
-                        const list = mutListFor(d, day);
-                        const idxA = list.findIndex((x) => x.id === ex.id);
-                        const idxB = list.findIndex((x) => x.id === arr[i + 1].id);
-                        [list[idxA], list[idxB]] = [list[idxB], list[idxA]];
-                      })}>↓</button>
-                    <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(ex.id); setEditText(ex.name); }}>✎</button>
-                    <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
-                      onClick={() => update((d) => { removeEx(d, day, ex.id); })}>✕</button>
-                  </Row>
-                </>
-              )}
-            </Row>
-          ))}
+                )}
+                {g.kind === "superset" ? (
+                  <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: "7px 9px", margin: "8px 0", background: T.surface2 }}>
+                    <Row style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: T.muted }}>
+                        🔗 Superset
+                      </span>
+                      <Row style={{ gap: 4 }}>
+                        <button className="ll-btn ll-btn-sm" aria-label="Remove a round"
+                          onClick={() => update((d) => { setSupersetRounds(mutListFor(d, day), g.id, g.rounds - 1); })}>−</button>
+                        <span className="ll-num" style={{ fontSize: 13, fontWeight: 700 }}>{g.rounds} rounds</span>
+                        <button className="ll-btn ll-btn-sm" aria-label="Add a round"
+                          onClick={() => update((d) => { setSupersetRounds(mutListFor(d, day), g.id, g.rounds + 1); })}>+</button>
+                        <button className="ll-btn ll-btn-sm" aria-label="Move superset up"
+                          onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, -1); })}>↑</button>
+                        <button className="ll-btn ll-btn-sm" aria-label="Move superset down"
+                          onClick={() => update((d) => { moveExerciseGroup(mutListFor(d, day), day, g.id, 1); })}>↓</button>
+                        <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+                          onClick={() => { update((d) => { unlinkSuperset(mutListFor(d, day), g.id); }); setLinkNote(""); }}>unlink</button>
+                      </Row>
+                    </Row>
+                    {g.members.map((m) => (
+                      <Row key={m.id} style={{ justifyContent: "space-between", padding: "5px 0" }}>
+                        <span style={{ fontSize: 14.5 }}>{m.icon ? m.icon + " " : ""}{m.name}</span>
+                        <Row style={{ gap: 4 }}>
+                          <button className="ll-btn ll-btn-sm" onClick={() => { setEditing(m.id); setEditText(m.name); }}>✎</button>
+                          <button className="ll-btn ll-btn-sm" style={{ color: T.neg }}
+                            onClick={() => update((d) => { removeEx(d, day, m.id); })}>✕</button>
+                        </Row>
+                      </Row>
+                    ))}
+                  </div>
+                ) : (
+                  /* unchanged single-exercise row — see the note below: this is
+                     a plain function call, NOT a nested component */
+                  singleExerciseRow(g.ex, day, gi, garr)
+                )}
+              </div>
+            );
+          })}
+          {linkNote && <div style={{ color: T.muted, fontSize: 12, marginTop: 6 }}>{linkNote}</div>}
           <Row style={{ marginTop: 10 }}>
             <input className="ll-input" placeholder="Add exercise…" value={newNames[day] || ""}
               onChange={(e) => setNewNames({ ...newNames, [day]: e.target.value })} />

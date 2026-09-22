@@ -1,0 +1,144 @@
+/* Real-Chrome: link a pair in Manage, log a round in Log, unlink.
+   Prereqs: `python3 -m http.server 8777` in the repo root. */
+const path = require("path");
+const puppeteer = require("puppeteer-core");
+
+const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const FILE = process.argv[2] || "j.html";
+const KEY = FILE === "j.html" ? "franco-fit-j-v1" : "franco-fit-a-v2";
+
+let pass = 0, fail = 0;
+const ok = (n, c, note = "") => { c ? pass++ : fail++; console.log(`${c ? "  ok  " : "FAIL  "} ${n} ${note}`); };
+
+const blob = {
+  version: 1, unit: "kg", userName: "Test", nameAsked: true, theme: "iron",
+  rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+  deloadWeeks: [], deloadPlan: {}, cycleHistory: [],
+  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: "2026-09-07",
+  exercises: [
+    { id: "press", day: "Tuesday", name: "Leg Press", prev: 80, targetSets: 4, repGoal: 10,
+      variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
+    { id: "curl", day: "Tuesday", name: "Leg Curl", prev: 40, targetSets: 3, repGoal: 12,
+      variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
+  ],
+  sessions: {},
+};
+
+(async () => {
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new",
+    args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  const page = await browser.newPage();
+  await page.setViewport({ width: 420, height: 1100, deviceScaleFactor: 2 });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+
+  await page.goto(`http://localhost:8777/${FILE}`, { waitUntil: "domcontentloaded" });
+  await page.evaluate((k, v) => { localStorage.clear(); localStorage.setItem(k, v); }, KEY, JSON.stringify(blob));
+  await page.goto(`http://localhost:8777/${FILE}`, { waitUntil: "networkidle2" });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  await wait(1500);
+
+  const txt = () => page.evaluate(() => document.body.innerText);
+  const clickText = (t) => page.evaluate((t) => {
+    /* Not every clickable element is a <button> — the superset card header
+       (like the exercise header) is a plain onClick div. Search
+       buttons/[role=button] plus divs/spans, and among the elements whose
+       text contains t, click the most deeply nested one (no matching
+       descendant) so the click lands where a real tap would and still
+       bubbles up to any ancestor's onClick handler. Mirrors
+       logging-regression.test.js's clickText. */
+    const all = [...document.querySelectorAll("button,[role=button],div,span")];
+    const matches = all.filter((el) => (el.textContent || "").includes(t));
+    const deepest = matches.filter((el) => !matches.some((other) => other !== el && el.contains(other)));
+    const el = deepest.find((el) => (el.textContent || "").trim() === t) || deepest[0];
+    if (!el) return false; el.click(); return true;
+  }, t);
+  const clickSel = (sel, idx = 0) => page.evaluate((sel, idx) => {
+    const el = document.querySelectorAll(sel)[idx];
+    if (!el) return false; el.click(); return true;
+  }, sel, idx);
+  const stored = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k)), KEY);
+
+  console.log(`\n== ${FILE} · superset link / log / unlink ==`);
+
+  /* ---- Manage: link ---- */
+  ok("Manage opens", await clickText("Manage")); await wait(600);
+  ok("link pill present between the two exercises",
+     await page.evaluate(() => !!document.querySelector('button[aria-label^="Link"]')));
+  ok("clicked the link pill", await clickSel('button[aria-label^="Link"]')); await wait(950);
+
+  let d = await stored();
+  const ids = d.exercises.map((e) => e.supersetId);
+  ok("both exercises share a supersetId", !!ids[0] && ids[0] === ids[1], `-> ${JSON.stringify(ids)}`);
+  ok("rounds reconciled upward to 4", d.exercises.map((e) => e.targetSets).join() === "4,4",
+     `-> ${d.exercises.map((e) => e.targetSets).join()}`);
+  ok("inline notice names what was raised", /raised/i.test(await txt()));
+  ok("group block shows the superset tag", /SUPERSET/i.test(await txt()));
+  ok("group shows one rounds control", /4 rounds/i.test(await txt()));
+
+  /* ---- Manage: rounds stepper writes both members ---- */
+  ok("rounds stepper present", await page.evaluate(() => !!document.querySelector('button[aria-label="Add a round"]')));
+  await clickSel('button[aria-label="Add a round"]'); await wait(950);
+  d = await stored();
+  ok("rounds stepper wrote every member", d.exercises.map((e) => e.targetSets).join() === "5,5",
+     `-> ${d.exercises.map((e) => e.targetSets).join()}`);
+  await clickSel('button[aria-label="Remove a round"]'); await wait(950);
+  d = await stored();
+  ok("rounds stepper decrements every member", d.exercises.map((e) => e.targetSets).join() === "4,4");
+
+  /* ---- Log: the group renders as one card ---- */
+  ok("Log opens", await clickText("Log")); await wait(700);
+  const t = await txt();
+  ok("one superset card in the Log", /SUPERSET/i.test(t));
+  ok("card titles both moves", /Leg Press \+ Leg Curl/.test(t), `-> ${(t.match(/Leg Press[^\n]*/) || [])[0]}`);
+
+  ok("superset card opens", await clickText("Leg Press + Leg Curl")); await wait(700);
+  ok("renders 4 round blocks", (await txt()).match(/Round \d/gi).length === 4,
+     `-> ${JSON.stringify((await txt()).match(/Round \d/gi))}`);
+  ok("renders a set row per member per round",
+     await page.evaluate(() => document.querySelectorAll('input[aria-label="reps"]').length === 8),
+     `-> ${await page.evaluate(() => document.querySelectorAll('input[aria-label="reps"]').length)}`);
+
+  /* ---- Log a full round; entries must stay separate ---- */
+  const fill = (idx, w, r) => page.evaluate((idx, w, r) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const ws = document.querySelectorAll('input[aria-label="weight"]');
+    const rs = document.querySelectorAll('input[aria-label="reps"]');
+    setter.call(ws[idx], w); ws[idx].dispatchEvent(new Event("input", { bubbles: true }));
+    setter.call(rs[idx], r); rs[idx].dispatchEvent(new Event("input", { bubbles: true }));
+  }, idx, w, r);
+
+  await fill(0, "100", "10"); await wait(500);
+  await fill(1, "50", "12"); await wait(950);
+
+  d = await stored();
+  const key = Object.keys(d.sessions)[0];
+  const e = d.sessions[key].entries;
+  ok("both members got their own entry", !!e.press && !!e.curl, `-> ${Object.keys(e).join()}`);
+  ok("press round 1 landed on press", String(e.press.sets[0].w) === "100" && String(e.press.sets[0].r) === "10",
+     `-> ${JSON.stringify(e.press.sets[0])}`);
+  ok("curl round 1 landed on curl", String(e.curl.sets[0].w) === "50" && String(e.curl.sets[0].r) === "12",
+     `-> ${JSON.stringify(e.curl.sets[0])}`);
+  ok("no volume merged between members", e.press.sets.length === 4 && e.curl.sets.length === 4,
+     `-> ${e.press.sets.length}/${e.curl.sets.length}`);
+  ok("round 1 marks complete", /Round 1[\s\S]{0,40}✓/i.test(await txt()));
+
+  /* ---- Manage: unlink ---- */
+  ok("Manage reopens", await clickText("Manage")); await wait(700);
+  ok("unlink control present", await clickText("unlink")); await wait(950);
+  d = await stored();
+  ok("supersetId cleared from both", d.exercises.every((x) => !x.supersetId));
+  ok("planned sets survive the unlink", d.exercises.map((x) => x.targetSets).join() === "4,4");
+
+  ok("Log shows two separate cards again", await clickText("Log")); await wait(700);
+  const t2 = await txt();
+  ok("superset tag gone", !/SUPERSET/i.test(t2));
+  ok("logged sets survive the unlink", /100/.test(t2) || /Leg Press/.test(t2));
+
+  ok("no page errors across the run", errors.length === 0, errors[0] ? `-> ${errors[0].slice(0, 120)}` : "");
+
+  await browser.close();
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})();
