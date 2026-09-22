@@ -962,17 +962,15 @@ function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
 /* ------------------------------------------------------------------ */
 /* Exercise card (Today view)                                          */
 /* ------------------------------------------------------------------ */
-function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
-  /* The array this card's exercise actually lives in. Deload plan entries
-     keep the program's ids, so writing to d.exercises during a deload week
-     would mutate the real program instead of the plan. */
+/* Everything an exercise's log entry needs, independent of how it is laid
+   out. ExerciseCard renders one of these; SupersetCard renders one per
+   member of a group. Lifted wholesale out of ExerciseCard — the logic is
+   unchanged, it just has two callers now. */
+function useExerciseEntry(data, update, ex, sessionKey, isDeload) {
+  /* The array this exercise actually lives in. Deload plan entries keep the
+     program's ids, so writing to d.exercises during a deload week would
+     mutate the real program instead of the plan. */
   const exHome = (d) => (isDeload ? ((d.deloadPlan || {})[ex.day] || d.exercises) : d.exercises);
-  const [open, setOpen] = useState(false);
-  const [addingMachine, setAddingMachine] = useState(false);
-  const [machineName, setMachineName] = useState("");
-  const [swapping, setSwapping] = useState(false);
-  const [swapText, setSwapText] = useState("");
-  const [removeArm, setRemoveArm] = useState(null);
 
   const session = data.sessions[sessionKey];
   const sessionDate = sessionKey.split("|")[0];
@@ -998,19 +996,6 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     return d.sessions[sessionKey].entries[ex.id];
   };
 
-  /* Baked-in sets: opening the card lays out (and heals) the planned set count */
-  useEffect(() => {
-    if (!open) return;
-    update((d) => {
-      const e = ensureEntry(d);
-      const nonExtra = e.sets.filter((s) => !s.extra);
-      const extras = e.sets.filter((s) => s.extra);
-      while (nonExtra.length < (ex.targetSets || 3)) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
-      e.sets = [...nonExtra, ...extras];
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   const changeSet = (i, ns) =>
     update((d) => {
       const e = ensureEntry(d);
@@ -1033,6 +1018,9 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
       e.sets.push({ w: lastWeighted ? lastWeighted.w : "", r: "", extra: true, tag: "" });
     });
 
+  const setSkipAll = (v) => update((d) => { ensureEntry(d).skippedAll = v; });
+  const removeSetAt = (i) => update((d) => { ensureEntry(d).sets.splice(i, 1); });
+
   const todaySets = entry ? entry.sets : [];
   const skippedAll = !!(entry && entry.skippedAll);
   const hasLogged = !skippedAll && todaySets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
@@ -1050,6 +1038,49 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     ? T.line
     : skippedAll ? "#565B63" : beating ? T.pos : liveDelta !== null && liveDelta < 0 ? T.neg : T.amber;
 
+  const bodyweight = lastSame && isBodyweight(lastSame.entry.sets);
+  /* Sets actually logged last time, positionally indexed — this is what a
+     set row compares against. */
+  const lastLogged = lastSame
+    ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
+    : [];
+
+  return {
+    exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
+    changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
+    hasLogged, plannedToday, exTotal, plannedFilled, exFilled, exComplete,
+    todayVol, lastVol, liveDelta, beating, stripColor, bodyweight, lastLogged,
+  };
+}
+
+function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
+  const [open, setOpen] = useState(false);
+  const [addingMachine, setAddingMachine] = useState(false);
+  const [machineName, setMachineName] = useState("");
+  const [swapping, setSwapping] = useState(false);
+  const [swapText, setSwapText] = useState("");
+  const [removeArm, setRemoveArm] = useState(null);
+
+  const {
+    exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
+    changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
+    plannedToday, exTotal, exFilled, exComplete, todayVol, lastVol,
+    liveDelta, beating, stripColor, bodyweight, lastLogged,
+  } = useExerciseEntry(data, update, ex, sessionKey, isDeload);
+
+  /* Baked-in sets: opening the card lays out (and heals) the planned set count */
+  useEffect(() => {
+    if (!open) return;
+    update((d) => {
+      const e = ensureEntry(d);
+      const nonExtra = e.sets.filter((s) => !s.extra);
+      const extras = e.sets.filter((s) => s.extra);
+      while (nonExtra.length < (ex.targetSets || 3)) nonExtra.push({ w: "", r: "", extra: false, tag: "" });
+      e.sets = [...nonExtra, ...extras];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const [burst, setBurst] = useState(null);
   const prevCompleteRef = useRef(exComplete);
   useEffect(() => {
@@ -1064,8 +1095,6 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     prevCompleteRef.current = exComplete;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exComplete]);
-
-  const bodyweight = lastSame && isBodyweight(lastSame.entry.sets);
 
   return (
     <div className="ll-card" style={{ position: "relative" }}>
@@ -1217,7 +1246,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                 Skipped today — add a reason in the note below if you want.
               </div>
               <button className="ll-btn ll-btn-sm" style={{ marginTop: 8 }}
-                onClick={() => update((d) => { ensureEntry(d).skippedAll = false; })}>
+                onClick={() => setSkipAll(false)}>
                 Undo — do this exercise
               </button>
             </div>
@@ -1228,22 +1257,17 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                   <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
                 </Row>
               )}
-              {(() => {
-                const lastLogged = lastSame
-                  ? lastSame.entry.sets.filter((x) => num(x.r) > 0 || num(x.w) > 0)
-                  : [];
-                return todaySets.map((s, i) => (
-                  <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
-                    compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
-                    onChange={(ns) => changeSet(i, ns)}
-                    onRemove={() => update((d) => { ensureEntry(d).sets.splice(i, 1); })} />
-                ));
-              })()}
+              {todaySets.map((s, i) => (
+                <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
+                  compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
+                  onChange={(ns) => changeSet(i, ns)}
+                  onRemove={() => removeSetAt(i)} />
+              ))}
 
               <Row style={{ marginTop: 4, marginBottom: 10 }}>
                 <button className="ll-btn" style={{ flex: 1 }} onClick={addExtraSet}>+ Extra set</button>
                 <button className="ll-btn" style={{ flex: 1, color: T.muted }}
-                  onClick={() => update((d) => { ensureEntry(d).skippedAll = true; })}>
+                  onClick={() => setSkipAll(true)}>
                   Skip all sets
                 </button>
               </Row>
