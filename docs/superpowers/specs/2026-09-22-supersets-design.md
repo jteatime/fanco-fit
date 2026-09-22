@@ -145,7 +145,7 @@ while the crash class it invites is real.)
 
 The exact returned shape is illustrative — it must be whatever `ExerciseCard`
 already derives, moved verbatim. The rule is that nothing in `ExerciseCard`'s
-current behaviour changes; the hook is a cut-and-lift, not a redesign.
+current behaviour changes; `exerciseEntry` is a cut-and-lift, not a redesign.
 
 `ExerciseCard` consumes it; `SupersetCard` calls it once per member. This removes
 duplication rather than adding it.
