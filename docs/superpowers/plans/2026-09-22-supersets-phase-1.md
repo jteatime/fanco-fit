@@ -47,7 +47,7 @@
 | `test/harness.js` | Loads the in-page script out of an HTML file and returns its top-level functions | Create (Task 1) |
 | `test/superset-logic.test.js` | Pure grouping + link/unlink/move assertions | Create (Task 1, extended Task 2) |
 | `test/superset-render.test.js` | react-dom/server assertions on `SupersetCard` | Create (Task 4) |
-| `test/logging-regression.test.js` | Real-Chrome single-exercise logging, guards the hook refactor | Create (Task 3) |
+| `test/logging-regression.test.js` | Real-Chrome single-exercise logging, guards the `exerciseEntry` extraction | Create (Task 3) |
 | `test/superset-ui.test.js` | Real-Chrome link → log a round → unlink | Create (Task 5) |
 | `test/package.json` | devDependencies for the test scripts only | Create (Task 1) |
 | `test/README.md` | Says the app itself still has no build step | Create (Task 1) |
@@ -717,7 +717,7 @@ skip-all — so the exerciseEntry extraction can be proven behaviour
 preserving rather than assumed to be."
 ```
 
-- [ ] **Step 4: Extract the hook**
+- [ ] **Step 4: Extract `exerciseEntry`**
 
 In **both** files, insert this immediately BEFORE the line
 `function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {`.
@@ -823,9 +823,9 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
 }
 ```
 
-- [ ] **Step 5: Rewire `ExerciseCard` to consume the hook**
+- [ ] **Step 5: Rewire `ExerciseCard` to consume `exerciseEntry`**
 
-In `ExerciseCard`, **delete** the block that now lives in the hook — everything
+In `ExerciseCard`, **delete** the block that now lives in `exerciseEntry` — everything
 from the `const exHome = (d) => ...` line down to and including the
 `const bodyweight = lastSame && isBodyweight(lastSame.entry.sets);` line, EXCEPT
 the six `useState` declarations, the baked-in-sets `useEffect`, and the `burst`
