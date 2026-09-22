@@ -197,6 +197,22 @@ const blob = {
   const t2 = await txt();
   ok("superset tag gone", !/SUPERSET/i.test(t2));
 
+  /* The Progress tab's stat strip and charts default to ALL TIME, not the live
+     cycle — a freshly started cycle would otherwise open on an empty strip.
+     StatStrip marks the active scope with aria-pressed. */
+  ok("Progress opens", await clickText("Progress")); await wait(800);
+  const scopeState = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll("button[aria-pressed]")]
+      .map((b) => ({ label: (b.textContent || "").trim(), pressed: b.getAttribute("aria-pressed") }))
+      .filter((b) => /all time|cycle/i.test(b.label));
+    return btns;
+  });
+  const allTime = scopeState.find((b) => /all time/i.test(b.label));
+  ok("stat strip defaults to All time", !!allTime && allTime.pressed === "true",
+     `-> ${JSON.stringify(scopeState)}`);
+  ok("the cycle scope is not the default", scopeState.some((b) => /cycle/i.test(b.label) && b.pressed === "false"),
+     `-> ${JSON.stringify(scopeState)}`);
+
   ok("no page errors across the run", errors.length === 0, errors[0] ? `-> ${errors[0].slice(0, 120)}` : "");
 
   await browser.close();
