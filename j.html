@@ -570,13 +570,17 @@ function linkSuperset(list, idA, idB) {
   const b = list.find((e) => e.id === idB);
   if (!a || !b || a === b) return { id: null, raised: [] };
   const id = a.supersetId || b.supersetId || `ss-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-  a.supersetId = id;
-  b.supersetId = id;
+  /* Merge whole groups, not just the two exercises tapped: moving B alone
+     would strand its former partners in a half group. */
+  const merging = new Set([a.supersetId, b.supersetId].filter(Boolean));
+  for (const e of list) {
+    if (e === a || e === b || (e.supersetId && merging.has(e.supersetId))) e.supersetId = id;
+  }
   const members = list.filter((e) => e.supersetId === id);
   const rounds = supersetRounds(members);
   const raised = [];
   for (const m of members) {
-    const from = m.targetSets || 3;
+    const from = m.targetSets ?? 3;
     if (from !== rounds) {
       raised.push({ name: m.name, from, to: rounds });
       m.targetSets = rounds;

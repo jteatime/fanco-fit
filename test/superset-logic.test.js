@@ -90,6 +90,19 @@ for (const file of ["index.html", "j.html"]) {
        list.map((e) => e.targetSets), [5, 5, 5]);
   }
 
+  /* Linking two exercises that are each already in a group merges both
+     groups whole — no member gets stranded behind. */
+  {
+    const list = [ex("a", 3, "s1"), ex("b", 3, "s1"), ex("c", 4, "s2"), ex("d", 4, "s2")];
+    const res = M.linkSuperset(list, "b", "c");
+    eq("merging two groups leaves exactly one group",
+       shape(M.groupedExercises(list)), [["superset", res.id, 4, ["a", "b", "c", "d"]]]);
+    eq("no member is stranded in the old group",
+       list.every((e) => e.supersetId === res.id), true);
+    eq("every member reconciles to the higher round count",
+       list.map((e) => e.targetSets), [4, 4, 4, 4]);
+  }
+
   /* ---- unlink ---- */
   {
     const list = [ex("a", 4, "s1"), ex("b", 4, "s1"), ex("c", 3)];
