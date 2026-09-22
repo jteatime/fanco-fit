@@ -118,7 +118,7 @@ html, body { scrollbar-width: none; -ms-overflow-style: none; }
 .ll-btn:active { transform: scale(0.97); }
 .ll-btn-chalk { background: ${T.ink}; color: ${T.bg}; border-color: ${T.ink}; }
 .ll-btn-sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
-.ll-step { width: 40px; height: 40px; border-radius: 10px; background: ${T.surface2}; border: 1px solid ${T.line}; color: ${T.ink}; font-size: 17px; font-weight: 700; cursor: pointer; flex: none; }
+.ll-step { width: 34px; height: 34px; border-radius: 9px; background: ${T.surface2}; border: 1px solid ${T.line}; color: ${T.ink}; font-size: 17px; font-weight: 700; cursor: pointer; flex: none; }
 .ll-step:active { transform: scale(0.94); }
 .ll-input { background: ${T.bg}; border: 1px solid ${T.line}; border-radius: 10px; color: ${T.ink}; padding: 9px 10px; font-size: 16px; width: 100%; font-family: inherit; box-sizing: border-box; }
 .ll-input:focus { outline: none; border-color: ${T.muted}; }
@@ -896,7 +896,7 @@ function DayStatusIcon({ status, size = 8, data }) {
 /* ------------------------------------------------------------------ */
 const SET_TAGS = ["drop set", "partials", "rest-pause", "burnout"];
 
-function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
+function SetRow({ idx, set, compareSet, unit, repGoal, hideIndex, onChange, onRemove }) {
   const w = num(set.w), r = num(set.r);
   let repsCls = "";
   let target = null;
@@ -912,13 +912,20 @@ function SetRow({ idx, set, compareSet, unit, repGoal, onChange, onRemove }) {
     }
   }
   const dim = set.skipped ? { opacity: 0.4, pointerEvents: "none" } : {};
+  /* Inside a superset round block the round label already numbers the set, so
+     the gutter index is redundant — and at 375px the row needs that width back
+     or the skip button shears off. The dash and the extra-set "+" still show:
+     those are states, not restatements of the round number. */
+  const showGutter = !hideIndex || set.skipped || set.extra;
   return (
     <div style={{ marginBottom: set.extra ? 4 : 8 }}>
-      <Row>
-        <span className="ll-num" style={{ color: set.skipped ? T.faint : set.extra ? T.amber : T.faint, width: 18, fontSize: 13, flex: "none" }}>
-          {set.skipped ? "–" : set.extra ? "+" : idx + 1}
-        </span>
-        <input className="ll-input ll-setnum" style={{ width: 78, ...dim }} inputMode="decimal" value={set.w} aria-label="weight" placeholder={unit || "kg"} disabled={!!set.skipped}
+      <Row style={{ gap: 5 }}>
+        {showGutter && (
+          <span className="ll-num" style={{ color: set.skipped ? T.faint : set.extra ? T.amber : T.faint, width: 18, fontSize: 13, flex: "none" }}>
+            {set.skipped ? "–" : set.extra ? "+" : idx + 1}
+          </span>
+        )}
+        <input className="ll-input ll-setnum" style={{ width: 70, ...dim }} inputMode="decimal" value={set.w} aria-label="weight" placeholder={unit || "kg"} disabled={!!set.skipped}
           onChange={(e) => onChange({ ...set, w: e.target.value })} />
         <span style={{ color: T.faint, fontSize: 13 }}>×</span>
         <button className="ll-step" style={dim} disabled={!!set.skipped} aria-label="minus 1 rep"
@@ -1370,6 +1377,9 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
     for (let r = 0; r < rounds; r++) if (!roundDone(r)) return r;
     return -1;
   })();
+  /* Rounds, not sets: both moves in a round are one unit of work, so 6 rounds
+     reads as 6 — summing members made a 6-round pair say 12. */
+  const roundsDone = Array.from({ length: rounds }, (_, r) => roundDone(r)).filter(Boolean).length;
   const allDone = members.every((_, i) => ctl[i].exComplete);
   const anyBeating = members.some((_, i) => ctl[i].beating);
   const anyDown = members.some((_, i) => ctl[i].liveDelta !== null && ctl[i].liveDelta < 0);
@@ -1393,7 +1403,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
           </Row>
           <Row style={{ gap: 8, flex: "none" }}>
             <span className="ll-num" style={{ color: T.faint, fontSize: 12 }}>
-              {members.reduce((a, _, i) => a + ctl[i].exFilled, 0)}/{members.reduce((a, _, i) => a + ctl[i].exTotal, 0)}
+              {roundsDone}/{rounds}
             </span>
             <span style={{ color: T.faint, fontSize: 13 }}>{open ? "▾" : "▸"}</span>
           </Row>
@@ -1452,7 +1462,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                       <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
                         {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
                       </div>
-                      <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal}
+                      <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal} hideIndex
                         compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
                         onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
                         onRemove={() => ctl[i].removeSetAt(absIdx)} />
