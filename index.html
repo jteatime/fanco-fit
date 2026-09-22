@@ -1803,7 +1803,11 @@ function LineChart({ points, color, fmt, showValues, onSelect }) {
   const linePath = "M" + points.map((p, i) => `${x(i)},${y(p.value)}`).join(" L");
   const areaPath = linePath + ` L${x(points.length - 1)},${H - padB} L${x(0)},${H - padB} Z`;
   const step = Math.ceil(points.length / 6);
-  const activeIdx = Math.min(sel, points.length - 1);
+  /* sel is seeded from points.length - 1, so a chart that first rendered
+     empty leaves it at -1. Switching metrics reuses this same component
+     instance with a populated points array, and the reset useEffect only
+     runs after render — clamp both ends or points[-1] throws. */
+  const activeIdx = Math.max(0, Math.min(sel, points.length - 1));
   const ap = points[activeIdx];
   const vStep = Math.ceil(points.length / 10);
 
@@ -1837,7 +1841,7 @@ function LineChart({ points, color, fmt, showValues, onSelect }) {
           return (
             <g key={`p${i}`}>
               <circle cx={x(i)} cy={y(p.value)} r="12" fill="transparent" style={{ cursor: "pointer" }} onClick={() => { setSel(i); if (onSelect) onSelect(p, i); }} />
-              {i === sel
+              {i === activeIdx
                 ? <circle cx={x(i)} cy={y(p.value)} r="4.5" fill={c} />
                 : <circle cx={x(i)} cy={y(p.value)} r="2.8" fill={T.bg} stroke={c} strokeWidth="1.5" />}
             </g>
@@ -1908,7 +1912,7 @@ function StatStrip({ data, views, view, scope, setScope }) {
   );
 }
 
-function TrendCard({ data, update, day }) {
+function TrendCard({ data, update, day, views, view, cycleScope }) {
   const [metric, setMetric] = useState("volume");
   const [scope, setScope] = useState("all");
   const [wInput, setWInput] = useState("");
@@ -1917,30 +1921,44 @@ function TrendCard({ data, update, day }) {
   const bwUnit = data.bwUnit || "lb";
   const collapsed = !!data.chartsCollapsed;
 
+  /* Trends follow whatever the Progress tab is showing — all time, or the
+     cycle selected in the stat strip. Weeks bucket inside their own cycle,
+     so an all-time chart reads across a rollover without week indices from
+     different cycles colliding. Previously this filtered on the live anchor
+     alone, which went empty the moment a new cycle started. */
+  const scopedView = cycleScope === "cycle" ? view : null;
   const inCycle = sortedSessions(data).filter(
-    (s) => weekOfCycle(data, s.date) >= 0 && Object.values(s.entries).some(entryHasData)
+    (s) => (!scopedView || inView(scopedView, s.date)) &&
+      Object.values(s.entries).some(entryHasData)
   );
 
-  const byWeek = {};
+  const buckets = [];
+  const byKey = {};
   inCycle.forEach((s) => {
-    const w = weekOfCycle(data, s.date);
-    (byWeek[w] = byWeek[w] || []).push(s);
+    const v = scopedView || viewFor(views, s.date) || views[views.length - 1];
+    const w = weekIn(v, s.date);
+    const k = `${v.number}|${w}`;
+    if (!byKey[k]) { byKey[k] = { v, w, list: [] }; buckets.push(byKey[k]); }
+    byKey[k].list.push(s);
   });
-  const weeks = Object.keys(byWeek).map(Number).sort((a, b) => a - b);
+  buckets.sort((a, b) => a.v.number - b.v.number || a.w - b.w);
+  const multiCycle = new Set(buckets.map((b) => b.v.number)).size > 1;
+  const wkLabel = (b) => (multiCycle ? `${b.v.name} · Week ${b.w + 1}` : `Week ${b.w + 1}`);
+  const wkShort = (b) => (multiCycle ? `${b.v.number}·${b.w + 1}` : `W${b.w + 1}`);
   const scoped = scope === "day" ? inCycle.filter((s) => s.day === day) : inCycle;
   const domShort = (iso) => String(new Date(iso + "T12:00:00").getDate());
 
   let chart;
   if (metric === "weight") {
-    const pts = weightEntries(data).map((e) => ({ label: fmtDate(e.iso), short: e.iso.slice(8, 10), value: e.v, iso: e.iso }));
+    const pts = weightEntriesIn(data, scopedView).map((e) => ({ label: fmtDate(e.iso), short: e.iso.slice(8, 10), value: e.v, iso: e.iso }));
     chart = { points: pts, color: T.blue, fmt: (v) => `${v} ${bwUnit}` };
   } else if (metric === "duration") {
     const pts = scope === "all"
-      ? weeks.map((w) => ({ w, ds: byWeek[w].map(sen).filter((x) => x != null && x > 0) }))
+      ? buckets.map((b) => ({ b, ds: b.list.map(sen).filter((x) => x != null && x > 0) }))
           .filter((x) => x.ds.length)
           .map((x) => ({
-            label: `Week ${x.w + 1} average`,
-            short: `W${x.w + 1}`,
+            label: `${wkLabel(x.b)} average`,
+            short: wkShort(x.b),
             value: Math.round(x.ds.reduce((a, b) => a + b, 0) / x.ds.length),
             sub: `${x.ds.length} timed sessions`,
           }))
@@ -1949,14 +1967,13 @@ function TrendCard({ data, update, day }) {
     chart = { points: pts, color: T.amber, fmt: (n) => `${n} min` };
   } else {
     const pts = scope === "all"
-      ? weeks.map((w) => {
-          const list = byWeek[w];
-          const dl = isDeloadWeek(data, w);
+      ? buckets.map((b) => {
+          const dl = isDeloadWeekIn(b.v, b.w);
           return {
-            label: `Week ${w + 1}${dl ? " · deload" : ""}`,
-            short: dl ? `☾${w + 1}` : `W${w + 1}`,
-            value: list.reduce((a, s) => a + dayVolume(s), 0),
-            sub: `${list.length} sessions`,
+            label: `${wkLabel(b)}${dl ? " · deload" : ""}`,
+            short: dl ? `☾${wkShort(b).replace(/^W/, "")}` : wkShort(b),
+            value: b.list.reduce((a, s) => a + dayVolume(s), 0),
+            sub: `${b.list.length} sessions`,
             deload: dl,
           };
         })
@@ -2442,7 +2459,7 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
       <StatStrip data={data} views={views} view={view} scope={scope} setScope={setScope} />
       <CycleGrid data={data} views={views} view={view} viewIdx={viewIdx} setViewIdx={setViewIdx}
         onOpenDay={setOpenDayKey} onGoToday={onGoToday} />
-      <TrendCard data={data} update={update} day={day} />
+      <TrendCard data={data} update={update} day={day} views={views} view={view} cycleScope={scope} />
       {exList.map((ex) => {
         const hist = historyFor(data, ex.id);
         const last = hist[hist.length - 1];
