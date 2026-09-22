@@ -55,6 +55,8 @@ The app stays two self-contained HTML files with no build step. `test/` is tooli
 - Consumes: nothing.
 - Produces:
   - `supersetRounds(members) -> number` — max of members' `targetSets`, min 1.
+    Uses `??`, not `||`: a `targetSets` of 0 must floor to 1 round, where `||`
+    would silently inflate it to 3.
   - `groupedExercises(list) -> Array<{kind:"single", ex} | {kind:"superset", id, rounds, members}>`
   - `test/harness.js` default export `load(htmlPath, names, tmpdir) -> object` mapping each requested top-level name to its value.
 
@@ -251,7 +253,7 @@ In **both** `index.html` and `j.html`, insert the following immediately after th
    the group stepper; max() is the safety net for a hand-edited or
    restored blob whose members drifted apart. */
 const supersetRounds = (members) =>
-  Math.max(1, ...members.map((m) => m.targetSets || 3));
+  Math.max(1, ...members.map((m) => m.targetSets ?? 3));
 
 /* Lay a day's exercise list out as singles and superset groups.
    Grouped by FIRST APPEARANCE rather than by consecutive runs: a reorder
