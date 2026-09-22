@@ -593,6 +593,75 @@ function groupedExercises(list) {
   });
 }
 
+/* Link two exercises in the same day's list into one group. If either is
+   already in a group, the other joins it rather than starting a new one,
+   which is how trisets get made. Round counts are reconciled UP: raising
+   the shorter move is safer than silently dropping a planned set. Returns
+   what changed so the caller can say so inline. */
+function linkSuperset(list, idA, idB) {
+  const a = list.find((e) => e.id === idA);
+  const b = list.find((e) => e.id === idB);
+  if (!a || !b || a === b) return { id: null, raised: [] };
+  const id = a.supersetId || b.supersetId || `ss-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  a.supersetId = id;
+  b.supersetId = id;
+  const members = list.filter((e) => e.supersetId === id);
+  const rounds = supersetRounds(members);
+  const raised = [];
+  for (const m of members) {
+    const from = m.targetSets || 3;
+    if (from !== rounds) {
+      raised.push({ name: m.name, from, to: rounds });
+      m.targetSets = rounds;
+    }
+  }
+  return { id, raised };
+}
+
+/* Break a group apart. Planned set counts stay where they are — the user
+   chose those numbers, even if the group reconciled them. */
+function unlinkSuperset(list, supersetId) {
+  for (const e of list) {
+    if (e.supersetId === supersetId) delete e.supersetId;
+  }
+}
+
+/* The group's rounds stepper. Rounds live in targetSets, so this writes
+   every member and nothing else. */
+function setSupersetRounds(list, supersetId, rounds) {
+  const n = Math.max(1, rounds);
+  for (const e of list) {
+    if (e.supersetId === supersetId) e.targetSets = n;
+  }
+}
+
+/* Move a whole group — a superset, or a lone exercise — one slot within its
+   day. `key` is a supersetId or an exercise id.
+
+   Day scoping matters: mutListFor(d, day) returns the WHOLE cross-day
+   d.exercises array in normal mode, and only that day's plan in deload
+   mode. Filtering by e.day handles both, and only the slots this day
+   already occupies get rewritten, so other days stay exactly where they
+   are. Moving by group also means a loose exercise can never be dropped
+   into the middle of a superset. */
+function moveExerciseGroup(list, day, key, dir) {
+  const slots = [];
+  list.forEach((e, i) => { if (e.day === day) slots.push(i); });
+  const groups = groupedExercises(slots.map((i) => list[i]));
+  const keyOf = (g) => (g.kind === "superset" ? g.id : g.ex.id);
+  const at = groups.findIndex((g) => keyOf(g) === key);
+  if (at < 0) return;
+  const to = at + dir;
+  if (to < 0 || to >= groups.length) return;
+  [groups[at], groups[to]] = [groups[to], groups[at]];
+  const flat = [];
+  for (const g of groups) {
+    if (g.kind === "single") flat.push(g.ex);
+    else flat.push(...g.members);
+  }
+  slots.forEach((slot, n) => { list[slot] = flat[n]; });
+}
+
 /* Archive the live cycle on rollover. Runs while the OLD cycleStart is
    still in effect, so deloadWeeks are still the right indices. */
 function archiveCurrentCycle(d, endIso) {

@@ -4,7 +4,7 @@ const os = require("os");
 const load = require("./harness.js");
 
 const REPO = path.join(__dirname, "..");
-const API = ["groupedExercises", "supersetRounds"];
+const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup"];
 
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
@@ -64,6 +64,97 @@ for (const file of ["index.html", "j.html"]) {
   eq("supersetRounds floors at 1", M.supersetRounds([ex("a", 0), ex("b", 0)]), 1);
   eq("supersetRounds defaults a missing targetSets to 3",
      M.supersetRounds([{ id: "a" }, { id: "b" }]), 3);
+
+  /* ---- link ---- */
+  {
+    const list = [ex("a", 4), ex("b", 3), ex("c", 3)];
+    const res = M.linkSuperset(list, "a", "b");
+    eq("link puts both members in one group",
+       shape(M.groupedExercises(list)),
+       [["superset", res.id, 4, ["a", "b"]], ["single", "c"]]);
+    eq("link raises the lower targetSets to the higher",
+       list.map((e) => e.targetSets), [4, 4, 3]);
+    eq("link reports what it raised", res.raised, [{ name: "b", from: 3, to: 4 }]);
+    eq("link reports nothing raised when counts already match",
+       M.linkSuperset([ex("d", 3), ex("e", 3)], "d", "e").raised, []);
+  }
+
+  /* ---- link onto an existing group makes a triset ---- */
+  {
+    const list = [ex("a", 3, "s1"), ex("b", 3, "s1"), ex("c", 5)];
+    M.linkSuperset(list, "b", "c");
+    eq("linking a neighbour onto a group joins that group",
+       shape(M.groupedExercises(list)),
+       [["superset", "s1", 5, ["a", "b", "c"]]]);
+    eq("joining a group raises every member to the new max",
+       list.map((e) => e.targetSets), [5, 5, 5]);
+  }
+
+  /* ---- unlink ---- */
+  {
+    const list = [ex("a", 4, "s1"), ex("b", 4, "s1"), ex("c", 3)];
+    M.unlinkSuperset(list, "s1");
+    eq("unlink leaves independent singles",
+       shape(M.groupedExercises(list)),
+       [["single", "a"], ["single", "b"], ["single", "c"]]);
+    eq("unlink leaves targetSets alone", list.map((e) => e.targetSets), [4, 4, 3]);
+    eq("unlink clears the field rather than blanking it",
+       list.every((e) => !("supersetId" in e)), true);
+  }
+
+  /* ---- rounds stepper writes every member ---- */
+  {
+    const list = [ex("a", 3, "s1"), ex("b", 3, "s1"), ex("c", 3)];
+    M.setSupersetRounds(list, "s1", 5);
+    eq("rounds stepper writes all members, not the loose exercise",
+       list.map((e) => e.targetSets), [5, 5, 3]);
+    M.setSupersetRounds(list, "s1", 0);
+    eq("rounds stepper floors at 1", list.map((e) => e.targetSets), [1, 1, 3]);
+  }
+
+  /* ---- group moves as a block, scoped to its day ---- */
+  {
+    const list = [ex("x", 3), ex("a", 3, "s1"), ex("b", 3, "s1"), ex("y", 3)];
+    M.moveExerciseGroup(list, "Tuesday", "s1", -1);
+    eq("group moves up past the exercise above it",
+       list.map((e) => e.id), ["a", "b", "x", "y"]);
+    M.moveExerciseGroup(list, "Tuesday", "s1", 1);
+    eq("group moves back down as a block",
+       list.map((e) => e.id), ["x", "a", "b", "y"]);
+    M.moveExerciseGroup(list, "Tuesday", "s1", 1);
+    eq("group moves down past the exercise below it",
+       list.map((e) => e.id), ["x", "y", "a", "b"]);
+    M.moveExerciseGroup(list, "Tuesday", "s1", 1);
+    eq("moving the last group down is a no-op",
+       list.map((e) => e.id), ["x", "y", "a", "b"]);
+    M.moveExerciseGroup(list, "Tuesday", "s1", -1);
+    M.moveExerciseGroup(list, "Tuesday", "s1", -1);
+    M.moveExerciseGroup(list, "Tuesday", "s1", -1);
+    eq("moving the first group up is a no-op",
+       list.map((e) => e.id), ["a", "b", "x", "y"]);
+  }
+
+  /* A single exercise moves by group too, so it can never be dropped into
+     the middle of a superset. */
+  {
+    const list = [ex("a", 3, "s1"), ex("b", 3, "s1"), ex("y", 3)];
+    M.moveExerciseGroup(list, "Tuesday", "y", -1);
+    eq("a lone exercise hops the whole group, not into it",
+       list.map((e) => e.id), ["y", "a", "b"]);
+  }
+
+  /* mutListFor hands back the whole cross-day array in normal mode, so the
+     move must rewrite only this day's slots. */
+  {
+    const other = (id) => ({ ...ex(id, 3), day: "Friday" });
+    const list = [other("f1"), ex("a", 3, "s1"), other("f2"), ex("b", 3, "s1"),
+                  other("f3"), ex("y", 3)];
+    M.moveExerciseGroup(list, "Tuesday", "y", -1);
+    eq("other days keep their exact positions",
+       list.map((e) => e.id), ["f1", "y", "f2", "a", "f3", "b"]);
+    eq("other days' exercises are untouched objects",
+       list.filter((e) => e.day === "Friday").map((e) => e.id), ["f1", "f2", "f3"]);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
