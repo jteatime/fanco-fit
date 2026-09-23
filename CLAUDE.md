@@ -54,6 +54,7 @@ files in parallel**, preserving these differences:
 | Manifest link in `<head>` | `manifest.webmanifest` | `manifest-j.webmanifest` |
 | Reset button copy | "Reset app" / "start fresh" | "Reset to sheet data" / "re-import the sheet" |
 | Connected-notes constants (`MY_INBOX`, `PARTNER_INBOX`, `MY_PUB`, `PARTNER_PUB`, `PARTNER_NAME`) | `MY_*` = the `-a` rows, `PARTNER_*` = the `-j` rows, `PARTNER_NAME` = "Jerold" | `MY_*` = the `-j` rows, `PARTNER_*` = the `-a` rows, `PARTNER_NAME` = "Alicia" |
+| `SEED_UNIT` | `"lb"` | `"kg"` | the unit this build's pre-migration history was logged in |
 
 ## GOLDEN RULES — read before any edit
 1. **Never change a `STORAGE_KEY`.** Changing it orphans the user's local data (the app

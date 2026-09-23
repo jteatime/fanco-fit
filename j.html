@@ -708,6 +708,54 @@ function migrateCycleHistory(d) {
   return d;
 }
 
+/* The unit this build seeds with, and therefore the unit its pre-migration
+   history was logged in. NOT data.unit: an install that has since switched
+   country reports the NEW unit there while its history is in the old one.
+   This value differs per build on purpose — see CLAUDE.md. */
+const SEED_UNIT = "kg";
+
+/* Stamp every weighted set with the unit it was logged in, once.
+
+   The unit change coincided with a cycle boundary, so a set's cycle
+   identifies its unit: an archived cycle was logged in SEED_UNIT, the live
+   cycle in data.unit. Stamping at migration rather than plumbing date
+   context through the volume functions means scoreOf and everything built
+   on it keep their signatures.
+
+   Idempotent — it runs on every load. A set that already carries `u` is
+   authoritative and is never rewritten, and no stored weight is modified. */
+function migrateUnits(d) {
+  const views = cycleViews(d);
+  for (const c of (d.cycleHistory || [])) {
+    if (!c.unit) c.unit = SEED_UNIT;
+  }
+  const unitAt = (iso) => {
+    const v = viewFor(cycleViews(d), iso);
+    if (!v) return d.unit || SEED_UNIT;
+    if (v.isCurrent) return d.unit || SEED_UNIT;
+    const rec = (d.cycleHistory || []).find((c) => c.number === v.number);
+    return (rec && rec.unit) || SEED_UNIT;
+  };
+  for (const s of Object.values(d.sessions || {})) {
+    const u = unitAt(s.date);
+    for (const e of Object.values(s.entries || {})) {
+      for (const st of (e.sets || [])) {
+        if (st.u) continue;                /* already stamped */
+        if (!(num(st.w) > 0)) continue;    /* weightless row: stamp on entry */
+        st.u = u;
+      }
+    }
+  }
+  /* ex.prev is written at rollover from the outgoing cycle's top weight, so
+     its unit is that cycle's unit — the most recent archived one. */
+  const lastArchived = (d.cycleHistory || [])[(d.cycleHistory || []).length - 1];
+  const prevU = (lastArchived && lastArchived.unit) || SEED_UNIT;
+  for (const ex of (d.exercises || [])) {
+    if (ex.prev != null && !ex.prevU) ex.prevU = prevU;
+  }
+  return d;
+}
+
 /* Most recent session containing this exercise (optionally same variant), excluding a key */
 function lastEntryFor(data, exId, variantId, excludeKey, beforeDate) {
   const list = sortedSessions(data);
@@ -3916,6 +3964,7 @@ function App() {
           if (!parsed.deloadWeeks) parsed.deloadWeeks = [];
           if (!parsed.deloadPlan) parsed.deloadPlan = {};
           migrateCycleHistory(parsed);
+          migrateUnits(parsed);
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
           bootNotes(parsed);

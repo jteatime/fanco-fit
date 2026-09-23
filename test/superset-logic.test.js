@@ -5,7 +5,7 @@ const load = require("./harness.js");
 const FXX = require("./fixture.js");
 
 const REPO = path.join(__dirname, "..");
-const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows", "kgOf", "toUnit", "volumeOf", "scoreOf"];
+const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows", "kgOf", "toUnit", "volumeOf", "scoreOf", "migrateUnits", "SEED_UNIT"];
 
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
@@ -217,6 +217,71 @@ for (const file of ["index.html", "j.html"]) {
     /* scoreOf's bodyweight fallback is a rep count and stays unitless */
     eq("bodyweight sets still score as reps",
        M.scoreOf([s("", 12, "lb"), s("", 10, "lb")]), 22);
+  }
+
+  /* ---- the migration ---- */
+  {
+    const st = (w, r) => ({ w, r, extra: false, tag: "" });
+    const mkSess = (date, day, w) => ({
+      date, day, celebrated: true,
+      entries: { a: { variantId: "main", note: "", swapName: "", sets: [st(w, 10), st(w, 8)] } },
+    });
+    const FD2 = FXX.fixtureDay();
+    const OLD = FXX.weeksBefore(6, FD2.date);   /* inside the archived cycle */
+    const NEW = FD2.date;                        /* inside the live cycle */
+    const mk = () => ({
+      version: 1, unit: "lb", userName: "T", nameAsked: true, theme: "iron",
+      rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+      deloadWeeks: [], deloadPlan: {},
+      cycleHistory: [{ number: 1, name: "Cycle 1", start: FXX.ago(120, FD2.date),
+                       end: FXX.ago(7, FD2.date), weeks: 16, deloadWeeks: [] }],
+      cycleNumber: 2, cycleName: "Cycle 2", cycleWeeks: 8, cycleStart: FXX.ago(6, FD2.date),
+      exercises: [{ id: "a", day: FD2.day, name: "Leg Press", prev: 70, targetSets: 2,
+                    variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
+      sessions: { [`${OLD}|${FD2.day}`]: mkSess(OLD, FD2.day, 70),
+                  [`${NEW}|${FD2.day}`]: mkSess(NEW, FD2.day, 180) },
+    });
+
+    const d = M.migrateUnits(mk());
+    eq("the archived cycle takes this build's seed unit",
+       d.cycleHistory[0].unit, M.SEED_UNIT);
+    eq("archived-cycle sets are stamped with it",
+       d.sessions[`${OLD}|${FD2.day}`].entries.a.sets.map((s) => s.u),
+       [M.SEED_UNIT, M.SEED_UNIT]);
+    eq("live-cycle sets take the current unit",
+       d.sessions[`${NEW}|${FD2.day}`].entries.a.sets.map((s) => s.u), ["lb", "lb"]);
+    eq("ex.prevU is stamped from the outgoing cycle",
+       d.exercises[0].prevU, M.SEED_UNIT);
+
+    /* no logged weight may change — that is the whole premise */
+    eq("stored weights are untouched",
+       [d.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].w,
+        d.sessions[`${NEW}|${FD2.day}`].entries.a.sets[0].w], [70, 180]);
+
+    /* idempotent: a second run changes nothing */
+    const once = JSON.stringify(d);
+    eq("migration is idempotent", JSON.stringify(M.migrateUnits(d)), once);
+
+    /* an existing stamp is authoritative and never overwritten */
+    const pre = mk();
+    pre.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u = "lb";
+    eq("a pre-existing stamp survives",
+       M.migrateUnits(pre).sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u, "lb");
+
+    /* a weightless row stays unstamped until a weight is typed */
+    const blank = mk();
+    blank.sessions[`${NEW}|${FD2.day}`].entries.a.sets = [{ w: "", r: "", extra: false, tag: "" }];
+    eq("a weightless set is left unstamped",
+       "u" in M.migrateUnits(blank).sessions[`${NEW}|${FD2.day}`].entries.a.sets[0], false);
+
+    /* a blob with no archived cycles: everything is the live unit */
+    const single = mk();
+    single.cycleHistory = [];
+    single.cycleStart = FXX.ago(120, FD2.date);
+    const sd = M.migrateUnits(single);
+    eq("no archived cycles -> all sets take the live unit",
+       [sd.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u,
+        sd.sessions[`${NEW}|${FD2.day}`].entries.a.sets[0].u], ["lb", "lb"]);
   }
 
   /* ---- CSV: the Supersets block ---- */
