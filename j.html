@@ -2051,8 +2051,10 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
           }
         }
       });
+      /* 4000 lb and 1800 kg are the same truck, so the divisor is in DISPLAY
+         units — vol is canonical kg and has to be converted first. */
       const per = data.unit === "lb" ? 4000 : 1800;
-      finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)), unit: data.unit };
+      finale = { vol, wins, best, trucks: Math.max(1, Math.round(toUnit(vol, data.unit) / per)), unit: data.unit };
     }
 
     setCelebration({ msg, from: note ? PARTNER_NAME : null, image: note ? (note.image || null) : null, refeed: preRefeed, reward: rewardOf(data), record, finale });
@@ -2482,7 +2484,9 @@ function TrendCard({ data, update, day, views, view, cycleScope }) {
           value: dayVolume(s),
           deload: isDeloadSess(data, s),
         }));
-    chart = { points: pts, color: T.pos, fmt: fmtVol };
+    /* fmt is called as fmt(value); without the unit fmtVol falls back to kg
+       and prints canonical kg under a "kg" label for a user logging in lb. */
+    chart = { points: pts, color: T.pos, fmt: (n) => fmtVol(n, data.unit) };
   }
 
   const saveWeight = () => {
