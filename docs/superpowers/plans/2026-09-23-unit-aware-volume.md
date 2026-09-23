@@ -264,8 +264,11 @@ function migrateUnits(d) {
     if (!c.unit) c.unit = SEED_UNIT;
   }
   const unitAt = (iso) => {
-    const v = viewFor(cycleViews(d), iso);
-    if (!v) return d.unit || SEED_UNIT;
+    const v = viewFor(views, iso);
+    /* A date with no view can only be BEFORE the live cycle's start — the
+       live view has end:null, so it matches everything onward. That makes it
+       old history, the exact case for which d.unit is the wrong answer. */
+    if (!v) return (d.cycleStart && iso < d.cycleStart) ? SEED_UNIT : (d.unit || SEED_UNIT);
     if (v.isCurrent) return d.unit || SEED_UNIT;
     const rec = (d.cycleHistory || []).find((c) => c.number === v.number);
     return (rec && rec.unit) || SEED_UNIT;
@@ -303,6 +306,27 @@ Leave `j.html` at `"kg"`. Add a line to the differences table in `CLAUDE.md`:
 | `SEED_UNIT` | `"lb"` | `"kg"` | the unit this build's pre-migration history was logged in |
 ```
 
+- [ ] **Step 3b: Give the two new fields a writer on the go-forward paths**
+
+A migration alone is not enough: both new fields go stale the first time the
+user starts a new cycle. In **both** files.
+
+In `archiveCurrentCycle`'s pushed object, record the unit the finished cycle
+was logged in — otherwise the next load defaults it to `SEED_UNIT`, labelling
+an lb cycle kg:
+
+```javascript
+    unit: d.unit,
+```
+
+In `startNewCycle`, beside the existing `ex.prev = ...` assignment, update the
+stamp too — `migrateUnits` only writes `prevU` when unset, so without this
+`prev` would hold lb while `prevU` said kg, a 2.2x misread:
+
+```javascript
+          ex.prevU = d.unit;
+```
+
 - [ ] **Step 4: Call it in the load path**
 
 In **both** files, in the load `useEffect`, immediately after the existing line:
@@ -318,6 +342,13 @@ add:
 ```
 
 Order matters: `migrateUnits` resolves cycles via `cycleViews`, which needs `cycleHistory` to exist.
+
+**And the restore path too.** A pasted JSON backup is the only undo that
+exists for this whole change, and it currently runs `migrateCycleHistory`
+without `migrateUnits` — so restored sets land unstamped and every lb one is
+read as kg until the next app load. Find the
+`restore={(next) => { migrateCycleHistory(next); ... }}` prop and add
+`migrateUnits(next);` beside the existing call, in both files.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
