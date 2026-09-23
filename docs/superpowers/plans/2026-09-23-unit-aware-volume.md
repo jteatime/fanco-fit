@@ -551,6 +551,13 @@ This closes the hole a migration alone leaves: switching unit mid-cycle."
   - `fmtVol(kg, unit) -> string` — canonical kg rendered in `unit`, with the unit appended
   - `setsLine(sets, unit) -> string` — each set converted into `unit`
 
+**Bodyweight coverage note:** a bodyweight score is a rep count and must stay
+unitless. These function-level assertions cannot reach a call site, so that
+case is covered end-to-end in `test/logging-regression.test.js` — which clears
+every weight in the open exercise and asserts the rendered "Today:" line reads
+as reps with no `kg`/`lb` token. Do not add a duplicate function-level
+assertion for it here.
+
 **This is the task most likely to be done half-way.** `fmtVol` has 6 call sites and `setsLine` has 8; a missed one silently prints kg where lb is meant, which is the same bug class this work exists to remove. The step below lists every line number.
 
 - [ ] **Step 1: Write the failing test**
@@ -572,12 +579,6 @@ for (const file of ["index.html", "j.html"]) {
   ok("the same volume in lb is larger and labelled lb",
      /3,0[0-9][0-9]/.test(M.fmtVol(vol, "lb")) && /lb/.test(M.fmtVol(vol, "lb")),
      `-> ${M.fmtVol(vol, "lb")}`);
-
-  /* A bodyweight score is a rep count and must stay unitless — the "Today:"
-     line is the one call site where an unguarded fmtVol would convert and
-     label one. Covered end-to-end in logging-regression, since these
-     function-level assertions cannot reach a call site. */
-  eq("a bodyweight score stays a rep count", M.volumeOf([{ w: "", r: 12, u: "lb" }]), 0);
 
   /* a kg-era set displayed while the user is in lb */
   ok("setsLine converts a kg set into lb", /154/.test(M.setsLine(kgSets, "lb")),
