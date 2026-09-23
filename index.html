@@ -1274,6 +1274,12 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     liveDelta, beating, stripColor, bodyweight, lastLogged, sessionUnit,
   } = exerciseEntry(data, update, ex, sessionKey, isDeload);
 
+  /* The unit the weight inputs on this card are in — the sets' own stamps
+     first, then this session's cycle. The editable input is deliberately not
+     converted, so its whole defence is that the header names the unit: header
+     and rows must read the same value or the placeholder lies. */
+  const colUnit = (todaySets.find((s) => s.u) || {}).u || sessionUnit || data.unit || "kg";
+
   /* Baked-in sets: opening the card lays out (and heals) the planned set count */
   useEffect(() => {
     if (!open) return;
@@ -1460,11 +1466,11 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
             <>
               {todaySets.length > 0 && (
                 <Row style={{ justifyContent: "center", gap: 6, margin: "2px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-                  <span>weight ({(todaySets.find((s) => s.u) || {}).u || sessionUnit || data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+                  <span>weight ({colUnit})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
                 </Row>
               )}
               {todaySets.map((s, i) => (
-                <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
+                <SetRow key={i} idx={i} set={s} unit={colUnit} repGoal={ex.repGoal}
                   compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
                   onChange={(ns) => changeSet(i, ns)}
                   onRemove={() => removeSetAt(i)} />
@@ -1546,6 +1552,12 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
   const rounds = group.rounds;
   /* One entry controller per member, in render order. */
   const ctl = members.map((m) => exerciseEntry(data, update, m, sessionKey, isDeload));
+  /* Column unit, per member: stamps first, then that member's session cycle.
+     A superset's members share a session and so a unit, but deriving it per
+     row keeps the row honest if a stamp ever disagrees. Tolerates a missing
+     ctl slot so the header cannot be the one thing that throws. */
+  const unitOf = (c) => (((c && c.todaySets) || []).find((x) => x.u) || {}).u || (c && c.sessionUnit) || data.unit || "kg";
+  const colUnit = unitOf(ctl[0]);
 
   /* Baked-in sets: opening the card lays out (and heals) every member's
      planned set count, mirroring ExerciseCard. */
@@ -1650,7 +1662,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
       {open && (
         <div className="ll-fade" style={{ padding: "0 14px 14px", borderTop: `1px solid ${T.line}` }}>
           <Row style={{ justifyContent: "center", gap: 6, margin: "10px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-            <span>weight ({(ctl[0].todaySets.find((s) => s.u) || {}).u || ctl[0].sessionUnit || data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+            <span>weight ({colUnit})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
           </Row>
 
           {/* rounds — a continuous rail runs the full height of this region,
@@ -1683,7 +1695,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                       <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
                         {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
                       </div>
-                      <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal} hideIndex
+                      <SetRow idx={r} set={s} unit={unitOf(ctl[i])} repGoal={m.repGoal} hideIndex
                         compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
                         onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
                         onRemove={() => ctl[i].removeSetAt(absIdx)} />
@@ -1701,7 +1713,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                 Extra · {m.name} only
               </div>
               <div style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9 }}>
-                <SetRow idx={absIdx} set={s} unit={data.unit} repGoal={m.repGoal} compareSet={undefined}
+                <SetRow idx={absIdx} set={s} unit={unitOf(ctl[i])} repGoal={m.repGoal} compareSet={undefined}
                   onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
                   onRemove={() => ctl[i].removeSetAt(absIdx)} />
               </div>
