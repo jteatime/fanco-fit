@@ -250,6 +250,46 @@ const blob = {
   });
   ok("Progress marks Leg Press as paired with Leg Curl", marker.press, `-> ${JSON.stringify(marker)}`);
   ok("and Leg Curl as paired with Leg Press", marker.curl);
+
+  /* The whole point: an all-time volume figure must not jump when the unit
+     changes. Switching unit re-scales what is DISPLAYED and must leave every
+     stored weight and stamp untouched. */
+  const before = await page.evaluate((k) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions)[0];
+    const e = Object.values(d.sessions[key].entries)[0];
+    return { unit: d.unit, w: String(e.sets[0].w), u: e.sets[0].u };
+  }, KEY);
+  ok("Manage opens for the unit switch", await clickText("Manage")); await wait(700);
+  /* Manage has TWO kg/lb rows — "Lifting" (data.unit) and "Bodyweight"
+     (data.bwUnit) — and neither carries aria-pressed; the active one is
+     marked by an "on" class. Scope to the Lifting row or this flips the
+     wrong field. */
+  const flipped = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("div")]
+      .filter((d) => /^Lifting\s*(kg|lb)\s*(kg|lb)\s*$/.test((d.textContent || "").replace(/\s+/g, " ").trim()));
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const btn = [...row.querySelectorAll("button")]
+      .find((b) => /^(kg|lb)$/.test((b.textContent || "").trim()) &&
+                   !String(b.className).split(/\s+/).includes("on"));
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  ok("found the inactive Lifting unit button", flipped); await wait(900);
+  const after = await page.evaluate((k) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions)[0];
+    const e = Object.values(d.sessions[key].entries)[0];
+    return { unit: d.unit, w: String(e.sets[0].w), u: e.sets[0].u };
+  }, KEY);
+  ok("the display unit changed", after.unit !== before.unit, `-> ${before.unit} -> ${after.unit}`);
+  ok("the stored weight did NOT change", after.w === before.w, `-> ${before.w} -> ${after.w}`);
+  ok("the stored stamp did NOT change", after.u === before.u, `-> ${before.u} -> ${after.u}`);
+  const bw = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)).bwUnit, KEY);
+  ok("the bodyweight unit was not collaterally flipped", bw === "lb", `-> bwUnit=${bw}`);
+
   ok("back to Log", await clickText("Log")); await wait(700);
 
   /* ---- Manage: ✎ inside the group block actually edits a member ---- */

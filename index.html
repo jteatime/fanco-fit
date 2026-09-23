@@ -920,6 +920,19 @@ function buildSheetRows(data) {
     rows.push([], ["Supersets"], ["Day", "Exercises", "Rounds"]);
     ssRows.forEach((r) => rows.push(r));
   }
+
+  /* Which unit each cycle was logged in. The grid's cells keep each set's
+     native number — an export is a record of what was logged — so without
+     this the sheet would silently mix kg and lb. Omitted when there is only
+     one unit, keeping a single-unit export identical to before. */
+  const uRows = cycleViews(data).map((v) => {
+    const rec = (data.cycleHistory || []).find((c) => c.number === v.number);
+    return [v.name, v.isCurrent ? (data.unit || "kg") : ((rec && rec.unit) || data.unit || "kg")];
+  });
+  if (new Set(uRows.map((r) => r[1])).size > 1) {
+    rows.push([], ["Units"], ["Cycle", "Unit"]);
+    uRows.forEach((r) => rows.push(r));
+  }
   return rows;
 }
 

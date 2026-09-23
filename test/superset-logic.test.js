@@ -319,6 +319,36 @@ for (const file of ["index.html", "j.html"]) {
     const flatU = M.buildSheetRows(unpaired).map((r) => (r || []).join("|"));
     eq("no supersets -> no Supersets block at all", flatU.includes("Supersets"), false);
   }
+
+  /* ---- CSV: the Units block ---- */
+  {
+    const FD3 = FXX.fixtureDay();
+    const st = (w, r, u) => ({ w, r, extra: false, tag: "", ...(u ? { u } : {}) });
+    const mixed = {
+      version: 1, unit: "lb", userName: "T", nameAsked: true, theme: "iron",
+      rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+      deloadWeeks: [], deloadPlan: {},
+      cycleHistory: [{ number: 1, name: "Cycle 1", start: FXX.ago(120, FD3.date),
+                       end: FXX.ago(7, FD3.date), weeks: 16, deloadWeeks: [], unit: "kg" }],
+      cycleNumber: 2, cycleName: "Cycle 2", cycleWeeks: 8, cycleStart: FXX.ago(6, FD3.date),
+      exercises: [{ id: "a", day: FD3.day, name: "Leg Press", prev: 70, targetSets: 2,
+                    variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
+      sessions: { [`${FD3.date}|${FD3.day}`]: { date: FD3.date, day: FD3.day, celebrated: true,
+        entries: { a: { variantId: "main", note: "", swapName: "", sets: [st(180, 9, "lb")] } } } },
+    };
+    const flat = M.buildSheetRows(mixed).map((r) => (r || []).join("|"));
+    eq("a mixed-unit export gains a Units block", flat.includes("Units"), true);
+    eq("its header names the columns", flat.includes("Cycle|Unit"), true);
+    ok("it records the archived cycle's unit", flat.some((r) => /^Cycle 1\|kg$/.test(r)),
+       `-> ${flat.filter((r) => /\|(kg|lb)$/.test(r)).join(" ;; ")}`);
+    ok("and the live cycle's unit", flat.some((r) => /^Cycle 2\|lb$/.test(r)));
+
+    /* one unit everywhere -> no block, so a single-unit export is unchanged */
+    const same = JSON.parse(JSON.stringify(mixed));
+    same.cycleHistory[0].unit = "lb";
+    eq("a single-unit export has no Units block",
+       M.buildSheetRows(same).map((r) => (r || []).join("|")).includes("Units"), false);
+  }
 }
 
 /* ---- the test fixtures themselves must not depend on what day it is ----
