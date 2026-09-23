@@ -593,6 +593,21 @@ function groupedExercises(list) {
   });
 }
 
+/* exercise id -> the names of its superset partners, for the little 🔗 line
+   in Progress. Derived through groupedExercises rather than read off
+   ex.supersetId directly, so an id left behind on a collapsed single can
+   never name a partner who no longer exists. */
+function partnersOf(list) {
+  const out = {};
+  for (const g of groupedExercises(list)) {
+    if (g.kind !== "superset") continue;
+    for (const m of g.members) {
+      out[m.id] = g.members.filter((x) => x.id !== m.id).map((x) => x.name);
+    }
+  }
+  return out;
+}
+
 /* Link two exercises in the same day's list into one group. If either is
    already in a group, the other joins it rather than starting a new one,
    which is how trisets get made. Round counts are reconciled UP: raising
@@ -812,6 +827,22 @@ function buildSheetRows(data) {
   if (extras.length) {
     rows.push([], ["Machines, swaps & notes"], ["Date", "Day", "Exercise", "Swap", "Machine", "Note"]);
     extras.forEach((n) => rows.push(n));
+  }
+
+  /* Supersets are a property of the program, not of a session, so they get
+     their own block emitted once rather than a line repeated on every
+     session row. Omitted entirely when nothing is paired, which keeps an
+     export without supersets byte-identical to before. */
+  const ssRows = [];
+  for (const day of DAYS) {
+    for (const g of groupedExercises(data.exercises.filter((e) => e.day === day))) {
+      if (g.kind !== "superset") continue;
+      ssRows.push([day, g.members.map((m) => m.name).join(" + "), String(g.rounds)]);
+    }
+  }
+  if (ssRows.length) {
+    rows.push([], ["Supersets"], ["Day", "Exercises", "Rounds"]);
+    ssRows.forEach((r) => rows.push(r));
   }
   return rows;
 }
@@ -1370,9 +1401,11 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
    Every member keeps its own session entry, so comparisons stay per
    exercise per machine — nothing here merges volume.
    `initialOpen` exists so tests can render the open state. */
-function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, initialOpen }) {
+function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, initialOpen, initialDetail }) {
   const [open, setOpen] = useState(!!initialOpen);
-  const [detail, setDetail] = useState(null); /* member id whose extras are shown */
+  /* member id whose extras are shown; initialDetail is a test seam, the same
+     way initialOpen is — the panel is otherwise only reachable by tapping. */
+  const [detail, setDetail] = useState(initialDetail || null);
   /* Swap state is a single pair scoped to whichever member's detail panel is
      open — only one detail panel can be open at a time, so this never needs
      to be keyed by member id; it is reset whenever the open member changes. */
@@ -1418,8 +1451,32 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
   const anyDown = members.some((_, i) => ctl[i].liveDelta !== null && ctl[i].liveDelta < 0);
   const groupStrip = !allDone ? T.line : anyBeating && !anyDown ? T.pos : anyDown ? T.neg : T.amber;
 
+  /* Finishing a superset earns the same confetti a lone exercise does — fires
+     on the group completing, not per member, so one pair gives one burst.
+     .ll-mini is already covered by the prefers-reduced-motion rule. */
+  const [burst, setBurst] = useState(null);
+  const prevAllDoneRef = useRef(allDone);
+  useEffect(() => {
+    if (!prevAllDoneRef.current && allDone && anyBeating) {
+      setBurst(Array.from({ length: 9 }, () => ({
+        mx: 18 + Math.random() * 80,
+        my: -(16 + Math.random() * 48),
+        mr: 180 + Math.random() * 420,
+      })));
+      setTimeout(() => setBurst(null), 900);
+    }
+    prevAllDoneRef.current = allDone;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allDone]);
+
   return (
     <div className="ll-card" style={{ position: "relative", border: `1px solid ${T.line}` }}>
+      {burst && burst.map((p, i) => (
+        <span key={i} className="ll-mini" style={{
+          background: i % 3 === 0 ? rewardOf(data).color : i % 3 === 1 ? T.pos : "#EDEEE9",
+          "--mx": `${p.mx}px`, "--my": `${p.my}px`, "--mr": `${p.mr}deg`,
+        }} />
+      ))}
       {/* header */}
       <div onClick={() => setOpen(!open)} style={{ padding: "13px 14px", cursor: "pointer" }}>
         <Row style={{ justifyContent: "space-between" }}>
@@ -1541,8 +1598,17 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                   Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets)}
                 </div>
               ) : (
-                <div style={{ color: T.faint, fontSize: 12.5, marginBottom: 8 }}>
-                  No history on {ctl[i].variant.name}.
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ color: T.faint, fontSize: 12.5 }}>
+                    No history on {ctl[i].variant.name}.
+                  </div>
+                  {/* Same cross-machine reference a lone exercise gets: without it
+                      a member's first session on a new machine showed nothing. */}
+                  {ctl[i].lastAny && (
+                    <div style={{ color: T.faint, fontSize: 12.5, marginTop: 4 }}>
+                      Other machine, {fmtDate(ctl[i].lastAny.date)}: <span className="ll-num">{setsLine(ctl[i].lastAny.entry.sets)}</span>
+                    </div>
+                  )}
                 </div>
               )}
               {/* machine picker */}
@@ -2653,6 +2719,10 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
     /* A session opened from an archived cycle has no meaningful index in
        the live cycle — resolve week and previous week inside its own. */
     const sv = viewFor(views, sess.date) || view;
+    /* Pairings are a program fact, not a session fact — sessions never
+       recorded whether they were performed as a superset — so this describes
+       how the exercises are paired NOW, in the present tense. */
+    const dayPartners = partnersOf(data.exercises.filter((e) => e.day === sess.day));
     const w = weekIn(sv, sess.date);
     let prev = null;
     for (let i = w - 1; i >= 0; i--) { const p = daySessionInView(data, sv, d, i); if (p) { prev = p; break; } }
@@ -2747,6 +2817,11 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
                     <span className="ll-display" style={{ fontSize: 16, fontWeight: 600 }}>
                       {ex.icon ? <span style={{ marginRight: 6 }}>{ex.icon}</span> : null}
                       {e.swapName || ex.name}
+                      {dayPartners[ex.id] ? (
+                        <span style={{ color: T.faint, fontSize: 11.5, marginLeft: 6, fontFamily: "Barlow", fontWeight: 400 }}>
+                          🔗 with {dayPartners[ex.id].join(" + ")}
+                        </span>
+                      ) : null}
                       {e.swapName ? <span style={{ color: T.amber, fontSize: 11.5, marginLeft: 6, fontFamily: "Barlow" }}>swapped</span> : null}
                     </span>
                     <Row style={{ gap: 8, flex: "none" }}>
@@ -2770,6 +2845,7 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
     );
   }
   const exList = data.exercises.filter((e) => e.day === day);
+  const partners = partnersOf(exList);
 
   if (openEx) {
     const ex = data.exercises.find((e) => e.id === openEx);
@@ -2869,6 +2945,9 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
             <Row style={{ justifyContent: "space-between" }}>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="ll-display" style={{ fontSize: 17, fontWeight: 600 }}>{ex.icon ? ex.icon + " " : ""}{ex.name}</div>
+                {partners[ex.id] && (
+                  <div style={{ color: T.faint, fontSize: 11.5, marginTop: 1 }}>🔗 with {partners[ex.id].join(" + ")}</div>
+                )}
                 <Row style={{ gap: 3, marginTop: 8, alignItems: "flex-end", height: 26 }}>
                   {mini.map((h, i) => {
                     const same = last && h.entry.variantId === last.entry.variantId;
