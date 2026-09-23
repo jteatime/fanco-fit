@@ -5,7 +5,7 @@ const load = require("./harness.js");
 const FXX = require("./fixture.js");
 
 const REPO = path.join(__dirname, "..");
-const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows", "kgOf", "toUnit", "volumeOf", "scoreOf", "migrateUnits", "SEED_UNIT"];
+const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows", "kgOf", "toUnit", "volumeOf", "scoreOf", "migrateUnits", "SEED_UNIT", "exerciseEntry", "num"];
 
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
@@ -28,6 +28,11 @@ const ex = (id, targetSets, supersetId) => ({
 /* Compact view of a grouping result, for readable assertions. */
 const shape = (groups) => groups.map((g) =>
   g.kind === "single" ? ["single", g.ex.id] : ["superset", g.id, g.rounds, g.members.map((m) => m.id)]);
+
+/* Every set in a blob, wherever it lives. */
+const allSets = (d) => Object.values(d.sessions || {})
+  .flatMap((s) => Object.values(s.entries || {}))
+  .flatMap((e) => e.sets || []);
 
 for (const file of ["index.html", "j.html"]) {
   console.log(`\n== ${file} ==`);
@@ -292,6 +297,43 @@ for (const file of ["index.html", "j.html"]) {
     eq("no archived cycles -> all sets take the live unit",
        [sd.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u,
         sd.sessions[`${NEW}|${FD2.day}`].entries.a.sets[0].u], [LIVE_UNIT, LIVE_UNIT]);
+  }
+
+  /* ---- the invariant: no weighted set is ever left unstamped ----
+     volumeOf reads a missing `u` as kg, so an unstamped weighted set is
+     counted as kg whatever the user typed. Three separate places construct
+     set objects — the typed weight, the weight cascade, and the extra-set
+     button — and this branch shipped with the third one unstamped, because
+     the completeness check was a grep for syntax rather than a statement of
+     the property. So state the property: drive a real logging session
+     through the shipped exerciseEntry (typed weights, cascade, extra set)
+     and assert that nothing weighted anywhere in the blob lacks a stamp. A
+     fourth set-writer cannot slip past this. */
+  {
+    const FD4 = FXX.fixtureDay();
+    const blob = {
+      version: 1, unit: "lb", userName: "T", nameAsked: true, theme: "iron",
+      rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+      deloadWeeks: [], deloadPlan: {}, cycleHistory: [],
+      cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: FXX.ago(21, FD4.date),
+      exercises: [{ id: "a", day: FD4.day, name: "Leg Press", prev: 70, targetSets: 3, repGoal: 10,
+                    variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
+      sessions: {},
+    };
+    const key = `${FD4.date}|${FD4.day}`;
+    /* The app's update() hands the mutator the live blob; mirror that. */
+    const update = (fn) => { fn(blob); };
+    const drive = () => M.exerciseEntry(blob, update, blob.exercises[0], key, false);
+
+    drive().changeSet(0, { w: "100", r: "8", extra: false, tag: "" });   /* + cascade */
+    drive().changeSet(1, { w: "105", r: "6", extra: false, tag: "" });   /* + cascade */
+    drive().addExtraSet();                                              /* copies 105 */
+
+    const weighted = allSets(blob).filter((s) => M.num(s.w) > 0);
+    const unstamped = weighted.filter((s) => !s.u);
+    ok("no weighted set anywhere is left unstamped",
+       weighted.length === 4 && unstamped.length === 0,
+       `-> ${weighted.length} weighted (want 4), ${unstamped.length} unstamped ${JSON.stringify(unstamped)}`);
   }
 
   /* ---- CSV: the Supersets block ---- */
