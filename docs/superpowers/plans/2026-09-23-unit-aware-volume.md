@@ -573,6 +573,12 @@ for (const file of ["index.html", "j.html"]) {
      /3,0[0-9][0-9]/.test(M.fmtVol(vol, "lb")) && /lb/.test(M.fmtVol(vol, "lb")),
      `-> ${M.fmtVol(vol, "lb")}`);
 
+  /* A bodyweight score is a rep count and must stay unitless — the "Today:"
+     line is the one call site where an unguarded fmtVol would convert and
+     label one. Covered end-to-end in logging-regression, since these
+     function-level assertions cannot reach a call site. */
+  eq("a bodyweight score stays a rep count", M.volumeOf([{ w: "", r: 12, u: "lb" }]), 0);
+
   /* a kg-era set displayed while the user is in lb */
   ok("setsLine converts a kg set into lb", /154/.test(M.setsLine(kgSets, "lb")),
      `-> ${M.setsLine(kgSets, "lb")}`);
@@ -637,7 +643,14 @@ const setsLine = (sets, unit) =>
 Six sites. Each gains `data.unit` (or the nearest available unit in scope). Find them with `grep -n "fmtVol(" index.html`:
 
 1. `ExerciseCard`'s last-time panel: `vol ${fmtVol(lastVol)}` → `${fmtVol(lastVol, data.unit)}` (drop the now-redundant `vol ` prefix, since the unit label reads better).
-2. `ExerciseCard`'s "Today:" line: `{fmtVol(todayVol)}` → `{fmtVol(todayVol, data.unit)}`, and drop the trailing `{isBodyweight(todaySets) ? "reps" : "vol"}` for the non-bodyweight branch — keep `reps` for bodyweight.
+2. `ExerciseCard`'s "Today:" line — **this one must be guarded, not just
+   threaded.** `todayVol = scoreOf(todaySets)`, and `scoreOf` returns a bare
+   **rep count** for a bodyweight exercise, which is unitless. Passing that
+   through `fmtVol` converts it by the kg↔lb factor and labels it as a weight.
+   Use the same ternary shape as sites 5 and 6:
+   `{isBodyweight(todaySets) ? `${repsOf(todaySets)} reps` : fmtVol(todayVol, data.unit)}`,
+   and drop the separate trailing `reps`/`vol` suffix, since each branch now
+   carries its own word.
 3. The finale: `{fmtVol(finale.vol)}` → `{fmtVol(finale.vol, data.unit)}`.
 4. The Progress day drill-in: `{fmtVol(vol)}` → `{fmtVol(vol, data.unit)}`.
 5. The drill-in per-exercise line: `fmtVol(evol)` → `fmtVol(evol, data.unit)`.
