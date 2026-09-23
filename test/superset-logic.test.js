@@ -336,6 +336,59 @@ for (const file of ["index.html", "j.html"]) {
        `-> ${weighted.length} weighted (want 4), ${unstamped.length} unstamped ${JSON.stringify(unstamped)}`);
   }
 
+  /* ---- a row's own stamp survives an edit, even against its session ----
+     Manage -> Units changes data.unit and explicitly does NOT convert stored
+     numbers, so a row stamped lb can sit in a session whose unit is now kg.
+     colUnit prefers the ROW's stamp, so that is what the column header and
+     the placeholder show the user. changeSet must therefore keep it: writing
+     sessionUnit instead would store kg under a column labelled lb, and leave
+     one exercise holding both units at once — permanently, since stamps are
+     authoritative and never re-derived. A review wave specified exactly that
+     re-stamp; this assertion is what stops it coming back. Deliberate
+     re-uniting goes through a clear (which drops the stamp), asserted below. */
+  {
+    const FD5 = FXX.fixtureDay();
+    const blob = {
+      version: 1, unit: "kg", userName: "T", nameAsked: true, theme: "iron",
+      rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+      deloadWeeks: [], deloadPlan: {}, cycleHistory: [],
+      cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: FXX.ago(21, FD5.date),
+      exercises: [{ id: "a", day: FD5.day, name: "Leg Press", prev: 70, targetSets: 3, repGoal: 10,
+                    variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
+      sessions: {
+        /* logged before the switch: three lb rows in a now-kg session */
+        [`${FD5.date}|${FD5.day}`]: {
+          date: FD5.date, day: FD5.day,
+          entries: { a: { variantId: "main", note: "", swapName: "", sets: [
+            { w: "180", r: "8", extra: false, tag: "", u: "lb" },
+            { w: "180", r: "8", extra: false, tag: "", u: "lb" },
+            { w: "180", r: "8", extra: false, tag: "", u: "lb" }] } },
+        },
+      },
+    };
+    const key = `${FD5.date}|${FD5.day}`;
+    const update = (fn) => { fn(blob); };
+    const drive = () => M.exerciseEntry(blob, update, blob.exercises[0], key, false);
+    const sets = () => blob.sessions[key].entries.a.sets;
+
+    eq("the session's unit really does disagree with the rows", drive().sessionUnit, "kg");
+
+    /* correcting set 1: 180 -> 185, in a column the app labels lb */
+    drive().changeSet(0, { ...sets()[0], w: "185" });
+    eq("an edited weight keeps the row's own stamp", sets()[0].u, "lb");
+    eq("and the cascade leaves its siblings' stamps alone",
+       sets().map((s) => s.u).join(), "lb,lb,lb");
+    /* the real damage of a re-stamp is two units inside one exercise */
+    eq("one exercise never holds two units at once",
+       new Set(sets().filter((s) => M.num(s.w) > 0).map((s) => s.u)).size, 1);
+
+    /* the documented way to re-unit a row: clear it, then retype */
+    drive().changeSet(0, { ...sets()[0], w: "" });
+    eq("clearing a weight drops the stamp", sets()[0].u, undefined);
+    drive().changeSet(0, { ...sets()[0], w: "84" });
+    eq("retyping after a clear adopts the session's unit", sets()[0].u, "kg");
+  }
+
   /* ---- CSV: the Supersets block ---- */
   {
     const mk = (id, name, sets, ss) => ({ ...ex(id, sets, ss), name, prev: 70, repGoal: 10 });

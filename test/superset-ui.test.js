@@ -368,8 +368,13 @@ const blob = {
     exercises: [{ id: "a", day: FD.day, name: "Old Press", prev: 70, targetSets: 2, repGoal: 10,
                   variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
     sessions: {
+      /* Deliberately NOT celebrated. A celebrated session hides Start Workout
+         on its own, which would make the "Start Workout stays hidden in a past
+         week" assertion below pass without ever exercising the weekOffset===0
+         gate — and that gate is the only thing keeping the view-relative wIdx
+         safe for daySessionIn/isDeloadWeek/exListFor. */
       [`${FX.ago(21, FD.date)}|${FD.day}`]: {
-        date: FX.ago(21, FD.date), day: FD.day, celebrated: true,
+        date: FX.ago(21, FD.date), day: FD.day,
         entries: { a: { variantId: "main", note: "", swapName: "",
           sets: [{ w: 70, r: 12, extra: false, tag: "", u: "kg" },
                  { w: 70, r: 10, extra: false, tag: "", u: "kg" }] } },
@@ -405,9 +410,12 @@ const blob = {
      (await headerDate()) === SESS_LABEL && walked > 0,
      `-> walked ${walked} weeks, header reads ${await headerDate()}, want ${SESS_LABEL}`);
   const label = await page.evaluate(() => document.body.innerText);
+  /* Scope this to the cycle line itself. Testing !/Cycle 2 ·/ against the whole
+     body would false-fail the day any other element on the Log tab happened to
+     print the live cycle's name. */
+  const cycleLine = (label.match(/Cycle \d+ · Week \d+[^\n]*/) || ["(none)"])[0];
   ok("the label names the archived cycle, not the live one",
-     /Cycle 1 · Week \d+/.test(label) && !/Cycle 2 ·/.test(label),
-     `-> ${(label.match(/Cycle \d[^\n]*/) || ["(none)"])[0]}`);
+     /^Cycle 1 · Week \d+/.test(cycleLine), `-> ${cycleLine}`);
   ok("Start Workout stays hidden in a past week", !/Start Workout/.test(label));
 
   /* Phase 2's requirement is that daySessionInView actually resolves the
