@@ -170,5 +170,26 @@ for (const file of ["index.html", "j.html"]) {
   }
 }
 
+/* ---- the test fixtures themselves must not depend on what day it is ----
+   These suites hardcoded a weekday and so passed on one day in seven,
+   reporting false failures the rest of the week. fixtureDay() must pick a
+   day both app builds train on, never in the future, whatever today is. */
+{
+  const FX = require("./fixture.js");
+  for (let i = 0; i < 7; i++) {
+    const today = FX.ago(i);
+    const fd = FX.fixtureDay(today);
+    eq(`fixtureDay(${FX.dayOf(today)}) picks a shared training day`,
+       FX.SHARED_TRAINING_DAYS.includes(fd.day), true);
+    eq(`fixtureDay(${FX.dayOf(today)}) is never in the future`, fd.date <= today, true);
+    eq(`fixtureDay(${FX.dayOf(today)}) name matches its date`, FX.dayOf(fd.date), fd.day);
+    eq(`fixtureDay(${FX.dayOf(today)}) is within the last week`, fd.back >= 0 && fd.back < 7, true);
+  }
+  /* prior-week history must land on the same weekday, a week earlier */
+  const fd = FX.fixtureDay();
+  eq("weeksBefore keeps the weekday", FX.dayOf(FX.weeksBefore(1, fd.date)), fd.day);
+  eq("weeksBefore(1) is 7 days earlier", FX.weeksBefore(1, fd.date), FX.ago(7, fd.date));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

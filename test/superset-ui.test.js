@@ -2,6 +2,7 @@
    Prereqs: `python3 -m http.server 8777` in the repo root. */
 const path = require("path");
 const puppeteer = require("puppeteer-core");
+const FX = require("./fixture.js");
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FILE = process.argv[2] || "j.html";
@@ -10,15 +11,17 @@ const KEY = FILE === "j.html" ? "franco-fit-j-v1" : "franco-fit-a-v2";
 let pass = 0, fail = 0;
 const ok = (n, c, note = "") => { c ? pass++ : fail++; console.log(`${c ? "  ok  " : "FAIL  "} ${n} ${note}`); };
 
+const FD = FX.fixtureDay();
+
 const blob = {
   version: 1, unit: "kg", userName: "Test", nameAsked: true, theme: "iron",
   rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
   deloadWeeks: [], deloadPlan: {}, cycleHistory: [],
-  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: "2026-09-07",
+  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: FX.ago(21, FD.date),
   exercises: [
-    { id: "press", day: "Tuesday", name: "Leg Press", prev: 80, targetSets: 4, repGoal: 10,
+    { id: "press", day: FD.day, name: "Leg Press", prev: 80, targetSets: 4, repGoal: 10,
       variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
-    { id: "curl", day: "Tuesday", name: "Leg Curl", prev: 40, targetSets: 3, repGoal: 12,
+    { id: "curl", day: FD.day, name: "Leg Curl", prev: 40, targetSets: 3, repGoal: 12,
       variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
   ],
   sessions: {},

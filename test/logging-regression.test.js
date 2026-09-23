@@ -3,6 +3,7 @@
    Prereqs: `python3 -m http.server 8777` in the repo root. */
 const path = require("path");
 const puppeteer = require("puppeteer-core");
+const FX = require("./fixture.js");
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FILE = process.argv[2] || "j.html";
@@ -12,19 +13,23 @@ let pass = 0, fail = 0;
 const ok = (n, c, note = "") => { c ? pass++ : fail++; console.log(`${c ? "  ok  " : "FAIL  "} ${n} ${note}`); };
 
 /* A day with one two-set exercise and history to compare against, so the
-   target placeholder and green/red both have something to work from. */
+   target placeholder and green/red both have something to work from.
+   The day and dates come from fixture.js: the Log tab opens on today's
+   weekday, so a literal weekday here only works one day in seven. */
+const FD = FX.fixtureDay();
+const PRIOR = FX.weeksBefore(1, FD.date);
 const blob = {
   version: 1, unit: "kg", userName: "Test", nameAsked: true, theme: "iron",
   rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
   deloadWeeks: [], deloadPlan: {}, cycleHistory: [],
-  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: "2026-09-07",
+  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: FX.ago(21, FD.date),
   exercises: [{
-    id: "t-press", day: "Tuesday", name: "Test Press", prev: 80, targetSets: 2, repGoal: 10,
+    id: "t-press", day: FD.day, name: "Test Press", prev: 80, targetSets: 2, repGoal: 10,
     variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main",
   }],
   sessions: {
-    "2026-09-08|Tuesday": {
-      date: "2026-09-08", day: "Tuesday", celebrated: true,
+    [`${PRIOR}|${FD.day}`]: {
+      date: PRIOR, day: FD.day, celebrated: true,
       entries: { "t-press": { variantId: "main", note: "", swapName: "",
         sets: [{ w: 100, r: 10, extra: false, tag: "" }, { w: 100, r: 8, extra: false, tag: "" }] } },
     },

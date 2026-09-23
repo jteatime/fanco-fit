@@ -4,6 +4,7 @@ const cp = require("child_process");
 const path = require("path");
 const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
+const FX = require("./fixture.js");
 
 const REPO = path.join(__dirname, "..");
 let pass = 0, fail = 0;
@@ -34,26 +35,29 @@ function loadWithRealReact(file, names) {
   return require(out);
 }
 
+const FD = FX.fixtureDay();
+const PRIOR = FX.weeksBefore(1, FD.date);
+
 const mkBlob = () => ({
   version: 1, unit: "kg", userName: "Test", nameAsked: true, theme: "iron",
   rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
   deloadWeeks: [], deloadPlan: {}, cycleHistory: [],
-  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: "2026-09-07",
+  cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8, cycleStart: FX.ago(21, FD.date),
   exercises: [
-    { id: "press", day: "Tuesday", name: "Leg Press", prev: 80, targetSets: 3, repGoal: 10,
+    { id: "press", day: FD.day, name: "Leg Press", prev: 80, targetSets: 3, repGoal: 10,
       supersetId: "s1", variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
-    { id: "curl", day: "Tuesday", name: "Leg Curl", prev: 40, targetSets: 3, repGoal: 12,
+    { id: "curl", day: FD.day, name: "Leg Curl", prev: 40, targetSets: 3, repGoal: 12,
       supersetId: "s1", variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
   ],
   sessions: {
-    "2026-09-15|Tuesday": { date: "2026-09-15", day: "Tuesday", celebrated: true, entries: {
+    [`${PRIOR}|${FD.day}`]: { date: PRIOR, day: FD.day, celebrated: true, entries: {
       press: { variantId: "main", note: "", swapName: "", sets: [
         { w: 90, r: 12, extra: false, tag: "" }, { w: 90, r: 11, extra: false, tag: "" }, { w: 90, r: 10, extra: false, tag: "" }] },
       curl: { variantId: "main", note: "", swapName: "", sets: [
         { w: 45, r: 12, extra: false, tag: "" }, { w: 45, r: 12, extra: false, tag: "" }, { w: 45, r: 10, extra: false, tag: "" }] },
     } },
     /* today, partially logged: round 1 done for both, round 2 empty */
-    "2026-09-22|Tuesday": { date: "2026-09-22", day: "Tuesday", entries: {
+    [`${FD.date}|${FD.day}`]: { date: FD.date, day: FD.day, entries: {
       press: { variantId: "main", note: "", swapName: "", sets: [
         { w: 95, r: 12, extra: false, tag: "" }, { w: 95, r: "", extra: false, tag: "" }, { w: 95, r: "", extra: false, tag: "" }] },
       curl: { variantId: "main", note: "", swapName: "", sets: [
@@ -66,7 +70,7 @@ const mkBlob = () => ({
    had zero coverage before this fix round. */
 const mkExtraBlob = () => {
   const data = mkBlob();
-  data.sessions["2026-09-22|Tuesday"].entries.curl.sets.push({ w: 50, r: 8, extra: true, tag: "" });
+  data.sessions[[`${FD.date}|${FD.day}`]].entries.curl.sets.push({ w: 50, r: 8, extra: true, tag: "" });
   return data;
 };
 
@@ -79,7 +83,7 @@ const mkExtraBlob = () => {
    by coincidentally reusing already-logged reps from the base fixture. */
 const mkSkipBlob = () => {
   const data = mkBlob();
-  const curlEntry = data.sessions["2026-09-22|Tuesday"].entries.curl;
+  const curlEntry = data.sessions[[`${FD.date}|${FD.day}`]].entries.curl;
   curlEntry.skippedAll = true;
   curlEntry.sets = curlEntry.sets.map((s) => ({ ...s, r: "" }));
   return data;
@@ -91,14 +95,14 @@ for (const file of ["index.html", "j.html"]) {
   const data = mkBlob();
   M.applySchedule(undefined);
   M.applyTheme("iron");
-  const group = M.groupedExercises(data.exercises.filter((e) => e.day === "Tuesday"))[0];
+  const group = M.groupedExercises(data.exercises.filter((e) => e.day === FD.day))[0];
   ok("fixture yields one superset group", group && group.kind === "superset" && group.rounds === 3,
      `-> ${group && group.kind} rounds ${group && group.rounds}`);
 
   let m;
   try {
     m = renderToStaticMarkup(React.createElement(M.SupersetCard, {
-      data, update: () => {}, group, sessionKey: "2026-09-22|Tuesday",
+      data, update: () => {}, group, sessionKey: `${FD.date}|${FD.day}`,
       dayColor: "#69B56D", isDeload: false,
     }));
     ok("SupersetCard renders", true, `(${m.length} chars)`);
@@ -128,7 +132,7 @@ for (const file of ["index.html", "j.html"]) {
   ok("collapsed card has no set inputs", !/aria-label="reps"/.test(m));
 
   const open = renderToStaticMarkup(React.createElement(M.SupersetCard, {
-    data, update: () => {}, group, sessionKey: "2026-09-22|Tuesday",
+    data, update: () => {}, group, sessionKey: `${FD.date}|${FD.day}`,
     dayColor: "#69B56D", isDeload: false, initialOpen: true,
   }));
   ok("open card renders one round block per round", (open.match(/Round \d/g) || []).length === 3,
@@ -155,9 +159,9 @@ for (const file of ["index.html", "j.html"]) {
 
   /* Extras — zero coverage before this fix round. */
   const extraData = mkExtraBlob();
-  const extraGroup = M.groupedExercises(extraData.exercises.filter((e) => e.day === "Tuesday"))[0];
+  const extraGroup = M.groupedExercises(extraData.exercises.filter((e) => e.day === FD.day))[0];
   const extraOpen = renderToStaticMarkup(React.createElement(M.SupersetCard, {
-    data: extraData, update: () => {}, group: extraGroup, sessionKey: "2026-09-22|Tuesday",
+    data: extraData, update: () => {}, group: extraGroup, sessionKey: `${FD.date}|${FD.day}`,
     dayColor: "#69B56D", isDeload: false, initialOpen: true,
   }));
   const extraTails = extraOpen.match(/Extra · [^<]+ only/g) || [];
@@ -174,9 +178,9 @@ for (const file of ["index.html", "j.html"]) {
      render as a skipped placeholder rather than a bare editable SetRow,
      and must let "now" advance past it. */
   const skipData = mkSkipBlob();
-  const skipGroup = M.groupedExercises(skipData.exercises.filter((e) => e.day === "Tuesday"))[0];
+  const skipGroup = M.groupedExercises(skipData.exercises.filter((e) => e.day === FD.day))[0];
   const skipOpen = renderToStaticMarkup(React.createElement(M.SupersetCard, {
-    data: skipData, update: () => {}, group: skipGroup, sessionKey: "2026-09-22|Tuesday",
+    data: skipData, update: () => {}, group: skipGroup, sessionKey: `${FD.date}|${FD.day}`,
     dayColor: "#69B56D", isDeload: false, initialOpen: true,
   }));
   ok("round 1 completes when the skipped member counts as done", />Round 1 ✓</.test(skipOpen));
