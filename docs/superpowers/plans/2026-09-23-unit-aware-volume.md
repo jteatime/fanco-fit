@@ -775,12 +775,23 @@ In `test/superset-ui.test.js`, after the Progress-marker assertions:
     return { unit: d.unit, w: String(e.sets[0].w), u: e.sets[0].u };
   }, KEY);
   ok("Manage opens for the unit switch", await clickText("Manage")); await wait(700);
+  /* Manage has TWO kg/lb rows — "Lifting" (data.unit) and "Bodyweight"
+     (data.bwUnit) — and neither carries aria-pressed; the active one is
+     marked by an "on" class. Scope to the Lifting row or this flips the
+     wrong field. */
   const flipped = await page.evaluate(() => {
-    const el = [...document.querySelectorAll("button")]
-      .find((b) => /^(kg|lb)$/.test((b.textContent || "").trim()) && b.getAttribute("aria-pressed") !== "true");
-    if (!el) return false; el.click(); return true;
+    const rows = [...document.querySelectorAll("div")]
+      .filter((d) => /^Lifting\s*(kg|lb)\s*(kg|lb)\s*$/.test((d.textContent || "").replace(/\s+/g, " ").trim()));
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const btn = [...row.querySelectorAll("button")]
+      .find((b) => /^(kg|lb)$/.test((b.textContent || "").trim()) &&
+                   !String(b.className).split(/\s+/).includes("on"));
+    if (!btn) return false;
+    btn.click();
+    return true;
   });
-  ok("found the other unit button", flipped); await wait(900);
+  ok("found the inactive Lifting unit button", flipped); await wait(900);
   const after = await page.evaluate((k) => {
     const d = JSON.parse(localStorage.getItem(k));
     const key = Object.keys(d.sessions)[0];
@@ -790,6 +801,8 @@ In `test/superset-ui.test.js`, after the Progress-marker assertions:
   ok("the display unit changed", after.unit !== before.unit, `-> ${before.unit} -> ${after.unit}`);
   ok("the stored weight did NOT change", after.w === before.w, `-> ${before.w} -> ${after.w}`);
   ok("the stored stamp did NOT change", after.u === before.u, `-> ${before.u} -> ${after.u}`);
+  const bw = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)).bwUnit, KEY);
+  ok("the bodyweight unit was not collaterally flipped", bw === "lb", `-> bwUnit=${bw}`);
 ```
 
 - [ ] **Step 2: Run both to verify they fail**
