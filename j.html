@@ -2544,11 +2544,13 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
   const [openEx, setOpenEx] = useState(null);
   const [openDayKey, setOpenDayKey] = useState(null);
   const [timeEdit, setTimeEdit] = useState(null);
-  /* Which cycle the grid + stat strip are showing; defaults to the live
-     one so Progress opens agreeing with the Log tab. */
+  /* Which cycle the GRID is showing: the live one, so it opens agreeing with
+     the Log tab. The stat strip and charts default to all time instead — the
+     headline numbers are more useful as a whole-history view, and a freshly
+     started cycle would otherwise open on an empty strip. */
   const views = cycleViews(data);
   const [viewIdx, setViewIdx] = useState(views.length - 1);
-  const [scope, setScope] = useState("cycle");
+  const [scope, setScope] = useState("all");
   const view = views[Math.min(viewIdx, views.length - 1)];
 
   /* Day log drill-in from the cycle grid */
