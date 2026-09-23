@@ -1096,8 +1096,14 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
      Log tab can reach an earlier cycle, a correction typed into a kg week
      must be stamped kg, not today's lb. */
   const sessionUnit = (() => {
-    const v = viewFor(cycleViews(data), sessionKey.split("|")[0]);
-    if (!v || v.isCurrent) return data.unit || "kg";
+    const sd = sessionKey.split("|")[0];
+    const v = viewFor(cycleViews(data), sd);
+    /* No view can only mean a date before the live cycle's start — old
+       history, where data.unit is the wrong answer. Mirrors unitAt. */
+    if (!v) return (data.cycleStart && sd < data.cycleStart)
+      ? ((data.cycleHistory || []).length ? (data.cycleHistory[0].unit || data.unit) : data.unit) || "kg"
+      : (data.unit || "kg");
+    if (v.isCurrent) return data.unit || "kg";
     const rec = (data.cycleHistory || []).find((c) => c.number === v.number);
     return (rec && rec.unit) || data.unit || "kg";
   })();
@@ -1123,15 +1129,20 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
       const oldW = String(e.sets[i].w ?? "");
       /* Stamp the unit the moment a weight exists. Clearing a weight drops
          the stamp too, so a re-entry in a different unit is not mislabelled. */
-      e.sets[i] = num(ns.w) > 0
-        ? { ...ns, u: ns.u || sessionUnit }
-        : (() => { const { u, ...rest } = ns; return rest; })();
+      if (num(ns.w) > 0) {
+        e.sets[i] = { ...ns, u: ns.u || sessionUnit };
+      } else {
+        const { u, ...rest } = ns;
+        e.sets[i] = rest;
+      }
       /* Cascade weight down to blank/matching sets — but never cascade a clear */
       const newW = String(ns.w ?? "");
       if (newW !== oldW && newW !== "") {
         for (let j = i + 1; j < e.sets.length; j++) {
           const wj = String(e.sets[j].w ?? "");
-          if (wj === "" || wj === oldW) e.sets[j] = { ...e.sets[j], w: ns.w };
+          if (wj === "" || wj === oldW) {
+            e.sets[j] = { ...e.sets[j], w: ns.w, u: e.sets[j].u || sessionUnit };
+          }
         }
       }
     });
