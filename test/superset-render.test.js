@@ -32,6 +32,7 @@ function loadWithRealReact(file, names) {
   global.fetch = () => Promise.resolve({ ok: false, json: () => ({}) });
   global.navigator = { userAgent: "node" };
   global.matchMedia = () => ({ matches: false, addEventListener() {}, addListener() {} });
+  delete require.cache[out];
   return require(out);
 }
 
@@ -224,6 +225,31 @@ for (const file of ["index.html", "j.html"]) {
      `-> ${region.trim().slice(0, 70)}`);
   /* the unswitched member still reports its own history normally */
   ok("the other member is unaffected", /Leg Curl/.test(panel));
+}
+
+/* ---- display converts canonical kg into the current unit ---- */
+for (const file of ["index.html", "j.html"]) {
+  const M = loadWithRealReact(file, ["fmtVol", "setsLine", "volumeOf", "toUnit", "applyTheme", "applySchedule"]);
+  M.applySchedule(undefined);
+  M.applyTheme("iron");
+  console.log(`\n== ${file} · unit display ==`);
+
+  const kgSets = [{ w: 70, r: 10, u: "kg" }, { w: 70, r: 10, u: "kg" }];
+  const vol = M.volumeOf(kgSets);                 /* 1400 kg canonical */
+  ok("volume in kg reads as kg", /1,400/.test(M.fmtVol(vol, "kg")) && /kg/.test(M.fmtVol(vol, "kg")),
+     `-> ${M.fmtVol(vol, "kg")}`);
+  ok("the same volume in lb is larger and labelled lb",
+     /3,0[0-9][0-9]/.test(M.fmtVol(vol, "lb")) && /lb/.test(M.fmtVol(vol, "lb")),
+     `-> ${M.fmtVol(vol, "lb")}`);
+
+  /* a kg-era set displayed while the user is in lb */
+  ok("setsLine converts a kg set into lb", /154/.test(M.setsLine(kgSets, "lb")),
+     `-> ${M.setsLine(kgSets, "lb")}`);
+  ok("setsLine leaves a kg set alone in kg", /70×10/.test(M.setsLine(kgSets, "kg")),
+     `-> ${M.setsLine(kgSets, "kg")}`);
+  const lbSets = [{ w: 180, r: 9, u: "lb" }];
+  ok("setsLine leaves an lb set alone in lb", /180×9/.test(M.setsLine(lbSets, "lb")),
+     `-> ${M.setsLine(lbSets, "lb")}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

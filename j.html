@@ -348,11 +348,20 @@ const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : kgOf(s) * 
 const repsOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.r)), 0);
 const isBodyweight = (sets) => volumeOf(sets) === 0 && repsOf(sets) > 0;
 const scoreOf = (sets) => { const v = volumeOf(sets); return v > 0 ? v : repsOf(sets); };
-const fmtVol = (n) => Math.round(n).toLocaleString("en-US");
-const setsLine = (sets) =>
+/* Volume arrives canonical (kg) and is shown in the unit the user is in, so
+   an all-time chart is continuous across a country move. */
+const fmtVol = (kg, unit) =>
+  `${Math.round(toUnit(kg, unit || "kg")).toLocaleString("en-US")} ${unit || "kg"}`;
+/* Read-only set lines convert into the current unit so a kg-era session and
+   an lb-era one can be read side by side. The EDITABLE input deliberately
+   does not — see SetRow. */
+const setsLine = (sets, unit) =>
   sets
     .filter((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0))
-    .map((s) => `${s.w}×${s.r}${s.tag ? ` (${s.tag})` : ""}`)
+    .map((s) => {
+      const w = num(s.w) > 0 ? Math.round(toUnit(kgOf(s), unit || "kg") * 10) / 10 : s.w;
+      return `${w}×${s.r}${s.tag ? ` (${s.tag})` : ""}`;
+    })
     .join("  ");
 const entryHasData = (e) => e && e.sets && e.sets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
 
@@ -999,13 +1008,16 @@ function SetRow({ idx, set, compareSet, unit, repGoal, hideIndex, onChange, onRe
   let repsCls = "";
   let target = null;
   if (compareSet) {
-    const lw = num(compareSet.w), lr = num(compareSet.r);
-    const lastScore = lw > 0 ? lw * lr : lr;
-    /* reps needed at today's weight to beat last week's set */
-    if (w > 0) target = Math.floor((lw * lr) / w) + 1;
-    else if (lw === 0) target = lr + 1;
+    /* Compare canonically: last week may be in a different unit from today,
+       and the answer must come back in THIS row's unit or the target would be
+       scaled wrong. */
+    const lwKg = kgOf(compareSet), lr = num(compareSet.r);
+    const wKg = kgOf(set);
+    const lastScore = lwKg > 0 ? lwKg * lr : lr;
+    if (wKg > 0) target = Math.floor((lwKg * lr) / wKg) + 1;
+    else if (lwKg === 0) target = lr + 1;
     if (r > 0) {
-      const todayScore = lw === 0 && w === 0 ? r : w * r;
+      const todayScore = lwKg === 0 && wKg === 0 ? r : wKg * r;
       repsCls = todayScore > lastScore ? "good" : todayScore < lastScore ? "bad" : "";
     }
   }
@@ -1201,7 +1213,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
     changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
     plannedToday, exTotal, exFilled, exComplete, todayVol, lastVol,
-    liveDelta, beating, stripColor, bodyweight, lastLogged,
+    liveDelta, beating, stripColor, bodyweight, lastLogged, sessionUnit,
   } = exerciseEntry(data, update, ex, sessionKey, isDeload);
 
   /* Baked-in sets: opening the card lays out (and heals) the planned set count */
@@ -1255,7 +1267,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
               </div>
               <div style={{ color: T.muted, fontSize: 12.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {ex.variants.length > 1 ? `${variant.name} · ` : ""}
-                {lastSame ? `last ${fmtDate(lastSame.date)}: ${setsLine(lastSame.entry.sets)}` : "no history on this machine"}
+                {lastSame ? `last ${fmtDate(lastSame.date)}: ${setsLine(lastSame.entry.sets, data.unit)}` : "no history on this machine"}
               </div>
             </div>
           </Row>
@@ -1292,10 +1304,10 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                     Last time · {fmtDate(lastSame.date)}
                   </span>
                   <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
-                    {bodyweight ? `${repsOf(lastSame.entry.sets)} reps` : `vol ${fmtVol(lastVol)}`}
+                    {bodyweight ? `${repsOf(lastSame.entry.sets)} reps` : fmtVol(lastVol, data.unit)}
                   </span>
                 </Row>
-                <div className="ll-num" style={{ fontSize: 15.5, lineHeight: 1.5 }}>{setsLine(lastSame.entry.sets)}</div>
+                <div className="ll-num" style={{ fontSize: 15.5, lineHeight: 1.5 }}>{setsLine(lastSame.entry.sets, data.unit)}</div>
                 {lastSame.entry.sets.some((s) => s.skipped && s.skipNote) && (
                   <div style={{ color: T.faint, fontSize: 12, marginTop: 4 }}>
                     {lastSame.entry.sets
@@ -1311,7 +1323,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                 <div style={{ color: T.muted, fontSize: 13.5 }}>First time on <b style={{ color: T.ink }}>{variant.name}</b>.</div>
                 {lastAny && (
                   <div style={{ color: T.faint, fontSize: 12.5, marginTop: 4 }}>
-                    Other machine, {fmtDate(lastAny.date)}: <span className="ll-num">{setsLine(lastAny.entry.sets)}</span>
+                    Other machine, {fmtDate(lastAny.date)}: <span className="ll-num">{setsLine(lastAny.entry.sets, data.unit)}</span>
                   </div>
                 )}
               </>
@@ -1390,7 +1402,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
             <>
               {todaySets.length > 0 && (
                 <Row style={{ justifyContent: "center", gap: 6, margin: "2px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-                  <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+                  <span>weight ({(todaySets.find((s) => s.u) || {}).u || sessionUnit || data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
                 </Row>
               )}
               {todaySets.map((s, i) => (
@@ -1411,7 +1423,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
               {exComplete && (
                 <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ color: T.muted, fontSize: 13 }}>
-                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> {isBodyweight(todaySets) ? "reps" : "vol"}
+                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol, data.unit)}</span> {isBodyweight(todaySets) ? "reps" : ""}
                   </span>
                   {!data.hideDeltas && <Delta value={liveDelta} />}
                 </Row>
@@ -1564,7 +1576,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
             <Row key={m.id} style={{ justifyContent: "space-between", marginTop: 3 }}>
               <span style={{ color: T.muted, fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {m.icon ? m.icon + " " : ""}{m.name}
-                {ctl[i].lastSame ? <span style={{ color: T.faint }}> · last {setsLine(ctl[i].lastSame.entry.sets)}</span> : null}
+                {ctl[i].lastSame ? <span style={{ color: T.faint }}> · last {setsLine(ctl[i].lastSame.entry.sets, data.unit)}</span> : null}
               </span>
               <Row style={{ gap: 7, flex: "none" }}>
                 <span className="ll-num" style={{ color: T.faint, fontSize: 11.5 }}>{ctl[i].exFilled}/{ctl[i].exTotal}</span>
@@ -1578,7 +1590,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
       {open && (
         <div className="ll-fade" style={{ padding: "0 14px 14px", borderTop: `1px solid ${T.line}` }}>
           <Row style={{ justifyContent: "center", gap: 6, margin: "10px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-            <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+            <span>weight ({(ctl[0].todaySets.find((s) => s.u) || {}).u || ctl[0].sessionUnit || data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
           </Row>
 
           {/* rounds — a continuous rail runs the full height of this region,
@@ -1654,7 +1666,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
               </div>
               {ctl[i].lastSame ? (
                 <div className="ll-num" style={{ fontSize: 14.5, marginBottom: 8 }}>
-                  Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets)}
+                  Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets, data.unit)}
                 </div>
               ) : (
                 <div style={{ marginBottom: 8 }}>
@@ -1665,7 +1677,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                       a member's first session on a new machine showed nothing. */}
                   {ctl[i].lastAny && (
                     <div style={{ color: T.faint, fontSize: 12.5, marginTop: 4 }}>
-                      Other machine, {fmtDate(ctl[i].lastAny.date)}: <span className="ll-num">{setsLine(ctl[i].lastAny.entry.sets)}</span>
+                      Other machine, {fmtDate(ctl[i].lastAny.date)}: <span className="ll-num">{setsLine(ctl[i].lastAny.entry.sets, data.unit)}</span>
                     </div>
                   )}
                 </div>
@@ -1828,7 +1840,7 @@ function Celebration({ msg, from, image, refeed, reward, record, finale, onClose
         <div style={{ marginTop: 16, background: "rgba(0,0,0,0.4)", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 18px", maxWidth: 320 }}>
           <div className="ll-display" style={{ fontSize: 16, letterSpacing: "0.14em", color: (reward && reward.color) || "#F6C851", marginBottom: 6 }}>CYCLE COMPLETE</div>
           <div style={{ fontSize: 13.5, color: T.ink, lineHeight: 1.5 }}>
-            Total volume <span className="ll-num">{fmtVol(finale.vol)}</span> · {finale.wins} winning days
+            Total volume <span className="ll-num">{fmtVol(finale.vol, finale.unit)}</span> · {finale.wins} winning days
             {finale.best ? ` · Most improved: ${finale.best.name} +${Math.round(finale.best.pctv)}%` : ""}
           </div>
           <div style={{ fontSize: 12, color: T.faint, marginTop: 4 }}>≈ {finale.trucks} pickup trucks lifted this cycle</div>
@@ -2006,7 +2018,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
         }
       });
       const per = data.unit === "lb" ? 4000 : 1800;
-      finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)) };
+      finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)), unit: data.unit };
     }
 
     setCelebration({ msg, from: note ? PARTNER_NAME : null, image: note ? (note.image || null) : null, refeed: preRefeed, reward: rewardOf(data), record, finale });
@@ -2759,7 +2771,7 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
           <Delta value={delta} />
         </Row>
         <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>
-          {sv.isCurrent ? "" : `${sv.name} · `}Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
+          {sv.isCurrent ? "" : `${sv.name} · `}Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol, data.unit)}</span>
           {prev ? ` · vs week ${weekIn(sv, prev.date) + 1}` : ""}
         </div>
         {(sess.dayNote || "").trim() && <div className="ll-note" style={{ marginBottom: 14 }}>“{sess.dayNote}”</div>}
@@ -2826,14 +2838,14 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
                     <Row style={{ gap: 8, flex: "none" }}>
                       <Delta value={exDelta} />
                       <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
-                        {isBodyweight(e.sets) ? `${repsOf(e.sets)} reps` : fmtVol(evol)}
+                        {isBodyweight(e.sets) ? `${repsOf(e.sets)} reps` : fmtVol(evol, data.unit)}
                       </span>
                     </Row>
                   </Row>
                   {vName && vName !== "Usual machine" && (
                     <div style={{ color: T.muted, fontSize: 12, marginBottom: 3 }}>{vName}</div>
                   )}
-                  <div className="ll-num" style={{ fontSize: 14.5 }}>{setsLine(e.sets)}</div>
+                  <div className="ll-num" style={{ fontSize: 14.5 }}>{setsLine(e.sets, data.unit)}</div>
                   {e.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{e.note}”</div> : null}
                 </div>
               </Row>
@@ -2890,8 +2902,8 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
               </Row>
               <PlateBar frac={r.vol / maxVol} color={T.amber} />
               <Row style={{ justifyContent: "space-between", marginTop: 7 }}>
-                <span className="ll-num" style={{ color: T.muted, fontSize: 13 }}>{setsLine(r.entry.sets)}</span>
-                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{isBodyweight(r.entry.sets) ? `${repsOf(r.entry.sets)} reps` : fmtVol(r.vol)}</span>
+                <span className="ll-num" style={{ color: T.muted, fontSize: 13 }}>{setsLine(r.entry.sets, data.unit)}</span>
+                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{isBodyweight(r.entry.sets) ? `${repsOf(r.entry.sets)} reps` : fmtVol(r.vol, data.unit)}</span>
               </Row>
               {r.entry.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{r.entry.note}”</div> : null}
             </div>
