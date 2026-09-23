@@ -115,6 +115,26 @@ const blob = {
   await wait(300);
   ok("card reports today's volume once complete", /Today:/.test(await txt()));
 
+  /* A bodyweight exercise scores as a rep count, which is unitless. Clearing
+     every weight while keeping reps is the reachable way to hit that branch —
+     it must not print a converted number or a kg/lb label. */
+  const nW = await page.evaluate(() => document.querySelectorAll('input[aria-label="weight"]').length);
+  for (let i = 0; i < nW; i++) {
+    await page.evaluate((i) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      const w = document.querySelectorAll('input[aria-label="weight"]')[i];
+      setter.call(w, ""); w.dispatchEvent(new Event("input", { bubbles: true }));
+    }, i);
+    await wait(120);
+  }
+  await wait(600);
+  const todayLine = await page.evaluate(() => {
+    const m = (document.body.innerText.match(/Today:[^\n]*/) || [""])[0];
+    return m.trim();
+  });
+  ok("bodyweight Today line reads as reps", /\breps\b/.test(todayLine), `-> "${todayLine}"`);
+  ok("bodyweight Today line carries no weight unit", !/\b(kg|lb)\b/.test(todayLine), `-> "${todayLine}"`);
+
   /* extra sets still append outside the planned total */
   ok("extra set button present", await clickText("+ Extra set")); await wait(500);
   ok("extra set appends a third row", (await reps()).length === 3, `-> ${(await reps()).length}`);

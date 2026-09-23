@@ -1423,7 +1423,9 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
               {exComplete && (
                 <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ color: T.muted, fontSize: 13 }}>
-                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol, data.unit)}</span> {isBodyweight(todaySets) ? "reps" : ""}
+                    Today: <span className="ll-num" style={{ color: T.ink }}>
+                      {isBodyweight(todaySets) ? `${repsOf(todaySets)} reps` : fmtVol(todayVol, data.unit)}
+                    </span>
                   </span>
                   {!data.hideDeltas && <Delta value={liveDelta} />}
                 </Row>
