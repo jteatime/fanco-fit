@@ -459,8 +459,14 @@ In **both** files, inside `exerciseEntry`, add this just above `const ensureEntr
      Log tab can reach an earlier cycle, a correction typed into a kg week
      must be stamped kg, not today's lb. */
   const sessionUnit = (() => {
-    const v = viewFor(cycleViews(data), sessionKey.split("|")[0]);
-    if (!v || v.isCurrent) return data.unit || "kg";
+    const sd = sessionKey.split("|")[0];
+    const v = viewFor(cycleViews(data), sd);
+    /* No view can only mean a date before the live cycle's start — old
+       history, where data.unit is the wrong answer. Mirrors unitAt. */
+    if (!v) return (data.cycleStart && sd < data.cycleStart)
+      ? (((data.cycleHistory || [])[0] || {}).unit || data.unit || "kg")
+      : (data.unit || "kg");
+    if (v.isCurrent) return data.unit || "kg";
     const rec = (data.cycleHistory || []).find((c) => c.number === v.number);
     return (rec && rec.unit) || data.unit || "kg";
   })();
@@ -485,9 +491,8 @@ with:
       const oldW = String(e.sets[i].w ?? "");
       /* Stamp the unit the moment a weight exists. Clearing a weight drops
          the stamp too, so a re-entry in a different unit is not mislabelled. */
-      e.sets[i] = num(ns.w) > 0
-        ? { ...ns, u: ns.u || sessionUnit }
-        : (() => { const { u, ...rest } = ns; return rest; })();
+      const { u: _dropped, ...bare } = ns;
+      e.sets[i] = num(ns.w) > 0 ? { ...ns, u: ns.u || sessionUnit } : bare;
 ```
 
 Add `sessionUnit` to the returned object of `exerciseEntry`, alongside `lastLogged`:
@@ -929,6 +934,14 @@ untouched, and 154lb x N produces the same canonical volume as 70kg x N."
 **The defect:** `wIdx = Math.min(maxWeek, Math.max(0, curWeek + weekOffset))` is a week index *within the live cycle*, floored at 0, and `‹` disables at `wIdx <= 0`. Cycle 2 is unreachable from the Log tab.
 
 - [ ] **Step 1: Write the failing test**
+
+**Carried in from Task 3:** Task 3's stamping test could not discriminate
+cycle-derived stamping from naive `data.unit` stamping, because logging into
+an archived cycle was not reachable until this task lands. Now that it is,
+add that assertion here: after walking back into the earlier cycle, type a
+weight and assert the stored set is stamped with **that cycle's** unit, not
+`data.unit`. That is the only test that proves `sessionUnit` does what it
+exists to do.
 
 In `test/superset-ui.test.js`, add a new block at the end, before the final `ok("no page errors across the run", ...)`. It needs a blob with an archived cycle holding a session, so build it inline and reload:
 
