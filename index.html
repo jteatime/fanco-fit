@@ -2137,6 +2137,11 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
     const finalW = (data.cycleWeeks || 8) - 1;
     /* An emptied deload day never produces a session — it is planned rest,
        so it must not hold the finale hostage. */
+    /* wIdx is VIEW-relative (it can name a week of an archived cycle) while
+       daySessionIn / isDeloadWeek / exListFor all index the LIVE cycle. These
+       three calls are correct ONLY because Finish is gated on
+       weekOffset === 0 (see the Finish Workout button). Move that gate and
+       these must become their *InView forms, scoped to wView. */
     const dayClosed = (dd) =>
       OPTIONAL_DAYS[dd] || dd === day || daySessionIn(data, dd, wIdx) ||
       (isDeloadWeek(data, wIdx) && exListFor(data, dd, wIdx).length === 0);
@@ -4171,8 +4176,13 @@ function App() {
           if (!parsed.noteAcks) parsed.noteAcks = {};
           if (!parsed.deloadWeeks) parsed.deloadWeeks = [];
           if (!parsed.deloadPlan) parsed.deloadPlan = {};
-          migrateCycleHistory(parsed);
-          migrateUnits(parsed);
+          /* Each migration is guarded on its own: the catch below reseeds from
+             scratch and overwrites the cloud row, so an unexpected throw in a
+             migration must degrade to un-migrated data, never to data loss.
+             The `throw new Error("empty")` further down is deliberate control
+             flow into that reseed and stays unguarded. */
+          try { migrateCycleHistory(parsed); } catch (e) { console.warn("cycle-history migration skipped", e); }
+          try { migrateUnits(parsed); } catch (e) { console.warn("unit migration skipped", e); }
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
           bootNotes(parsed);
@@ -4297,7 +4307,7 @@ function App() {
           <ProgressView data={data} update={update} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { migrateCycleHistory(next); migrateUnits(next); applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { try { migrateCycleHistory(next); } catch (e) { console.warn("cycle-history migration skipped", e); } try { migrateUnits(next); } catch (e) { console.warn("unit migration skipped", e); } applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (
