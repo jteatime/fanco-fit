@@ -1002,28 +1002,31 @@ const VariantDot = ({ index }) => {
 };
 
 /* This week's status for a given training day */
-function dayWeekStatus(data, d, wArg) {
+function dayWeekStatus(data, d, wArg, viewArg) {
   const today = todayISO();
-  const w = wArg !== undefined ? wArg : Math.max(0, weekOfCycle(data, today));
-  const sess = daySessionIn(data, d, w);
+  const view = viewArg || { number: data.cycleNumber, name: data.cycleName, start: data.cycleStart,
+                            end: null, weeks: data.cycleWeeks || 8,
+                            deloadWeeks: data.deloadWeeks || [], isCurrent: true };
+  const w = wArg !== undefined ? wArg : Math.max(0, weekIn(view, today));
+  const sess = daySessionInView(data, view, d, w);
   if (sess) {
-    if (isDeloadWeek(data, w)) return "deload";
+    if (isDeloadWeekIn(view, w)) return "deload";
     const finished = sess.celebrated || sess.date < today;
     if (!finished) return "logged";
     let prev = null;
     for (let i = w - 1; i >= 0; i--) {
-      if (isDeloadWeek(data, i)) continue;
-      const p = daySessionIn(data, d, i); if (p) { prev = p; break; }
+      if (isDeloadWeekIn(view, i)) continue;
+      const p = daySessionInView(data, view, d, i); if (p) { prev = p; break; }
     }
     const dv = dayVolume(sess);
     const pv = prev ? dayVolume(prev) : null;
     return pv !== null && dv > pv ? "star" : pv !== null && dv < pv ? "down" : "logged";
   }
-  const dateIso = cellDateFor(data.cycleStart, w, d);
+  const dateIso = cellDateFor(view.start, w, d);
   if (dateIso === today) return "today";
   if (dateIso < today) {
     /* A deload day the user deliberately emptied is planned rest, not a miss */
-    if (isDeloadWeek(data, w) && exListFor(data, d, w).length === 0) return "optional";
+    if (isDeloadWeekIn(view, w) && exListForView(data, view, d, w).length === 0) return "optional";
     return OPTIONAL_DAYS[d] ? "optional" : "missed";
   }
   return "future";
@@ -1967,14 +1970,33 @@ function Celebration({ msg, from, image, refeed, reward, record, finale, onClose
 function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote }) {
   const rw = rewardOf(data);
   const [weekOffset, setWeekOffset] = useState(0);
+  /* Navigate by DATE, not by an index inside the live cycle: a week index
+     floored at 0 made every earlier cycle unreachable. Resolve the week's
+     date first, then ask which cycle owns it. */
+  const views = cycleViews(data);
   const curWeek = Math.max(0, weekOfCycle(data, todayISO()));
   const maxWeek = Math.max((data.cycleWeeks || 8) - 1, curWeek);
-  const wIdx = Math.min(maxWeek, Math.max(0, curWeek + weekOffset));
-  const existing = daySessionIn(data, day, wIdx);
-  const dateFor = existing ? existing.date : cellDateFor(data.cycleStart, wIdx, day);
+  /* Anchor on the SELECTED day's date in the offset week, so the anchor is
+     the very date we are about to render — not some other weekday's. */
+  const weekAnchor = addDays(cellDateFor(data.cycleStart, curWeek, day), weekOffset * 7);
+  /* Cycles are contiguous, so viewFor normally hits. It can miss only past
+     both ends: clamp to the earliest or latest cycle accordingly. */
+  const wView = viewFor(views, weekAnchor) ||
+    (weekAnchor < views[0].start ? views[0] : views[views.length - 1]);
+  const wIdx = Math.max(0, weekIn(wView, weekAnchor));
+  const existing = daySessionInView(data, wView, day, wIdx);
+  const dateFor = existing ? existing.date : cellDateFor(wView.start, wIdx, day);
   const sessionKey = existing ? existing.key : `${dateFor}|${day}`;
-  const isDeload = isDeloadWeek(data, wIdx);
-  const exList = exListFor(data, day, wIdx);
+  const isDeload = isDeloadWeekIn(wView, wIdx);
+  const exList = exListForView(data, wView, day, wIdx);
+  /* Backward limit is week 0 of the EARLIEST cycle, not week 0 of the live
+     one. Comparing dates would be wrong: the anchor is the selected weekday,
+     which can sit after a cycle's Monday start while still inside week 0, so
+     a date comparison would let ‹ step past the earliest cycle into an
+     unresolvable date. Forward stays capped at the live cycle's planned
+     length. */
+  const atEarliest = wView.number === views[0].number && wIdx <= 0;
+  const atLatest = wView.isCurrent && wIdx >= maxWeek;
   const isToday = dateFor === todayISO();
 
   const sess = data.sessions[sessionKey];
@@ -2154,11 +2176,11 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
         />
       )}
       <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
-        <button className="ll-chip ll-day" disabled={wIdx <= 0} aria-label="previous week"
-          style={{ opacity: wIdx <= 0 ? 0.35 : 1 }}
+        <button className="ll-chip ll-day" disabled={atEarliest} aria-label="previous week"
+          style={{ opacity: atEarliest ? 0.35 : 1 }}
           onClick={() => setWeekOffset(weekOffset - 1)}>‹</button>
         {DAYS.map((d) => {
-          const st = dayWeekStatus(data, d, wIdx);
+          const st = dayWeekStatus(data, d, wIdx, wView);
           return (
             <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`}
               style={st === "star" ? { borderColor: `${rw.color}8C`, background: `${rw.color}12`, boxShadow: `0 0 9px ${rw.color}59` } : {}}
@@ -2168,8 +2190,8 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
             </button>
           );
         })}
-        <button className="ll-chip ll-day" disabled={wIdx >= maxWeek} aria-label="next week"
-          style={{ opacity: wIdx >= maxWeek ? 0.35 : 1 }}
+        <button className="ll-chip ll-day" disabled={atLatest} aria-label="next week"
+          style={{ opacity: atLatest ? 0.35 : 1 }}
           onClick={() => setWeekOffset(weekOffset + 1)}>›</button>
       </Row>
       <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
@@ -2178,7 +2200,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
             {day} <span style={{ color: T.muted, fontSize: 17, fontWeight: 500 }}>· {fmtDate(dateFor)}</span>
           </div>
           <div style={{ color: T.muted, fontSize: 13 }}>
-            Cycle {data.cycleNumber} · Week {wIdx + 1}{isDeload ? " · ☾ deload" : ""}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
+            {wView.name} · Week {wIdx + 1}{isDeload ? " · ☾ deload" : ""}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
           </div>
         </div>
       </Row>

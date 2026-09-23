@@ -342,6 +342,78 @@ const blob = {
   ok("the cycle scope is not the default", scopeState.some((b) => /cycle/i.test(b.label) && b.pressed === "false"),
      `-> ${JSON.stringify(scopeState)}`);
 
+  /* The Log tab must reach earlier cycles. Seed an archived cycle with a
+     session in it, then walk back with the ‹ button. */
+  const archived = {
+    version: 1, unit: "lb", userName: "T", nameAsked: true, theme: "iron",
+    rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+    deloadWeeks: [], deloadPlan: {},
+    cycleHistory: [{ number: 1, name: "Cycle 1", start: FX.ago(56, FD.date),
+                     end: FX.ago(14, FD.date), weeks: 6, deloadWeeks: [], unit: "kg" }],
+    cycleNumber: 2, cycleName: "Cycle 2", cycleWeeks: 8, cycleStart: FX.ago(13, FD.date),
+    exercises: [{ id: "a", day: FD.day, name: "Old Press", prev: 70, targetSets: 2, repGoal: 10,
+                  variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
+    sessions: {
+      [`${FX.ago(21, FD.date)}|${FD.day}`]: {
+        date: FX.ago(21, FD.date), day: FD.day, celebrated: true,
+        entries: { a: { variantId: "main", note: "", swapName: "",
+          sets: [{ w: 70, r: 12, extra: false, tag: "", u: "kg" },
+                 { w: 70, r: 10, extra: false, tag: "", u: "kg" }] } },
+      },
+    },
+  };
+  await page.evaluate((k, v) => { localStorage.clear(); localStorage.setItem(k, v); }, KEY, JSON.stringify(archived));
+  await page.goto(`http://localhost:8777/${FILE}`, { waitUntil: "networkidle2" });
+  await wait(1600);
+
+  const prevWeek = () => page.evaluate(() => {
+    const el = document.querySelector('button[aria-label="previous week"]');
+    if (!el || el.disabled) return false; el.click(); return true;
+  });
+  let walked = 0;
+  for (let i = 0; i < 6; i++) { if (await prevWeek()) { walked++; await wait(350); } else break; }
+  ok("the ‹ button walks back more than the live cycle allows", walked >= 3,
+     `-> walked back ${walked} weeks`);
+  const label = await page.evaluate(() => document.body.innerText);
+  ok("the label names the earlier cycle", /Cycle 1/.test(label),
+     `-> ${(label.match(/Cycle \d[^\n]*/) || ["(none)"])[0]}`);
+  ok("that cycle's logged session is reachable", /Old Press/.test(label));
+  ok("Start Workout stays hidden in a past week", !/Start Workout/.test(label));
+
+  /* Task 3 added sessionUnit so a weight typed into an earlier cycle is
+     stamped with THAT cycle's unit, not today's data.unit. That could not be
+     proven until the Log tab could reach an earlier cycle at all — it can
+     now, so prove it here: open the archived exercise (visible in every week
+     since exercises aren't per-cycle) and type a fresh weight, then check
+     which unit the newly stamped set carries. */
+  ok("archived exercise card opens", await clickText("Old Press")); await wait(600);
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const w = document.querySelector('input[aria-label="weight"]');
+    setter.call(w, "133"); w.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await wait(200);
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const r = document.querySelector('input[aria-label="reps"]');
+    setter.call(r, "5"); r.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const findStamp = () => page.evaluate((k) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    for (const s of Object.values(d.sessions)) {
+      const e = s.entries && s.entries.a;
+      const set = e && e.sets.find((x) => String(x.w) === "133");
+      if (set) return { date: s.date, u: set.u, dataUnit: d.unit };
+    }
+    return null;
+  }, KEY);
+  let stamp = null;
+  for (let i = 0; i < 30 && !stamp; i++) { stamp = await findStamp(); if (!stamp) await wait(150); }
+  ok("a weight typed into the archived cycle is stamped with THAT cycle's unit",
+     !!stamp && stamp.u === "kg", `-> ${JSON.stringify(stamp)}`);
+  ok("not with today's live-cycle unit", !!stamp && stamp.dataUnit === "lb" && stamp.u !== stamp.dataUnit,
+     `-> ${JSON.stringify(stamp)}`);
+
   ok("no page errors across the run", errors.length === 0, errors[0] ? `-> ${errors[0].slice(0, 120)}` : "");
 
   await browser.close();
