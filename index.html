@@ -1125,6 +1125,16 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
   const lastSame = lastEntryFor(data, ex.id, variantId, sessionKey, sessionDate);
   const lastAny = lastEntryFor(data, ex.id, null, sessionKey, sessionDate);
 
+  /* The unit a new set in THIS session should carry. Not data.unit: once the
+     Log tab can reach an earlier cycle, a correction typed into a kg week
+     must be stamped kg, not today's lb. */
+  const sessionUnit = (() => {
+    const v = viewFor(cycleViews(data), sessionKey.split("|")[0]);
+    if (!v || v.isCurrent) return data.unit || "kg";
+    const rec = (data.cycleHistory || []).find((c) => c.number === v.number);
+    return (rec && rec.unit) || data.unit || "kg";
+  })();
+
   const ensureEntry = (d) => {
     if (!d.sessions[sessionKey]) {
       d.sessions[sessionKey] = { date: sessionKey.split("|")[0], day: ex.day, entries: {} };
@@ -1144,7 +1154,11 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
     update((d) => {
       const e = ensureEntry(d);
       const oldW = String(e.sets[i].w ?? "");
-      e.sets[i] = ns;
+      /* Stamp the unit the moment a weight exists. Clearing a weight drops
+         the stamp too, so a re-entry in a different unit is not mislabelled. */
+      e.sets[i] = num(ns.w) > 0
+        ? { ...ns, u: ns.u || sessionUnit }
+        : (() => { const { u, ...rest } = ns; return rest; })();
       /* Cascade weight down to blank/matching sets — but never cascade a clear */
       const newW = String(ns.w ?? "");
       if (newW !== oldW && newW !== "") {
@@ -1193,7 +1207,7 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
     exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
     changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
     hasLogged, plannedToday, exTotal, plannedFilled, exFilled, exComplete,
-    todayVol, lastVol, liveDelta, beating, stripColor, bodyweight, lastLogged,
+    todayVol, lastVol, liveDelta, beating, stripColor, bodyweight, lastLogged, sessionUnit,
   };
 }
 

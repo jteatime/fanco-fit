@@ -159,6 +159,18 @@ const blob = {
      `-> ${JSON.stringify(e.press.sets[0])}`);
   ok("curl round 1 landed on curl", String(e.curl.sets[0].w) === "50" && String(e.curl.sets[0].r) === "12",
      `-> ${JSON.stringify(e.curl.sets[0])}`);
+
+  /* Every weight typed carries the unit it was typed in, so volume stays
+     canonical without re-deriving dates later. */
+  const stamps = await page.evaluate((k, date) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions).find((x) => x.startsWith(date));
+    const e = d.sessions[key].entries;
+    return { press: e.press.sets[0].u, curl: e.curl.sets[0].u, unit: d.unit };
+  }, KEY, FD.date);
+  ok("a newly logged set is stamped with the session's unit",
+     stamps.press === stamps.unit && stamps.curl === stamps.unit,
+     `-> press=${stamps.press} curl=${stamps.curl} data.unit=${stamps.unit}`);
   ok("no volume merged between members", e.press.sets.length === 4 && e.curl.sets.length === 4,
      `-> ${e.press.sets.length}/${e.curl.sets.length}`);
   ok("round 1 marks complete", /Round 1[\s\S]{0,40}✓/i.test(await txt()));
