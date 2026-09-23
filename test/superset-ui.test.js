@@ -366,27 +366,83 @@ const blob = {
   await page.goto(`http://localhost:8777/${FILE}`, { waitUntil: "networkidle2" });
   await wait(1600);
 
+  /* The Log tab opens on defaultDay(), which is the fixture's training day
+     only when today happens to be one. Select it explicitly. The chips are
+     abbreviated (a single letter on a build that trains 5+ days, so "T" and
+     "S" are ambiguous), so identify the right one by the header it produces
+     rather than by its label. */
+  const headerDay = () => page.evaluate(() =>
+    (document.body.innerText.match(/^([A-Z][a-z]+day) ·/m) || [])[1] || "");
+  /* Clicks the i-th day chip — the buttons beside ‹/› in the week row, which
+     are the only ones there without an aria-label. Returns how many there
+     are, so passing an out-of-range i is a pure count. */
+  const clickDayChip = (i) => page.evaluate((i) => {
+    const prev = document.querySelector('button[aria-label="previous week"]');
+    if (!prev) return 0;
+    const days = [...prev.parentElement.querySelectorAll("button")]
+      .filter((b) => !b.getAttribute("aria-label"));
+    if (i < days.length) days[i].click();
+    return days.length;
+  }, i);
+  const selectDay = async (name) => {
+    if ((await headerDay()) === name) return true;
+    const n = await clickDayChip(-1);
+    for (let i = 0; i < n; i++) {
+      await clickDayChip(i); await wait(300);
+      if ((await headerDay()) === name) return true;
+    }
+    return false;
+  };
+  ok("the fixture's training day is selected", await selectDay(FD.day),
+     `-> header says ${await headerDay()}, want ${FD.day}`);
+
   const prevWeek = () => page.evaluate(() => {
     const el = document.querySelector('button[aria-label="previous week"]');
     if (!el || el.disabled) return false; el.click(); return true;
   });
+  /* The seeded session sits (56 - 21) / 7 = 5 weeks into Cycle 1, i.e. its
+     "Week 6", and three ‹ steps back from the live week land exactly there.
+     The old loop walked six and stopped on Cycle 1 Week 3, so it never
+     displayed the archived session at all — which is why the assertion
+     below used to be a name match that any week satisfied. */
+  const SESS_WEEK = (56 - 21) / 7 + 1;
   let walked = 0;
-  for (let i = 0; i < 6; i++) { if (await prevWeek()) { walked++; await wait(350); } else break; }
-  ok("the ‹ button walks back more than the live cycle allows", walked >= 3,
+  for (let i = 0; i < 3; i++) { if (await prevWeek()) { walked++; await wait(350); } else break; }
+  ok("the ‹ button walks back past the live cycle", walked === 3,
      `-> walked back ${walked} weeks`);
   const label = await page.evaluate(() => document.body.innerText);
-  ok("the label names the earlier cycle", /Cycle 1/.test(label),
+  ok("the label names the earlier cycle and the seeded week",
+     new RegExp(`Cycle 1 · Week ${SESS_WEEK}`).test(label),
      `-> ${(label.match(/Cycle \d[^\n]*/) || ["(none)"])[0]}`);
-  ok("that cycle's logged session is reachable", /Old Press/.test(label));
   ok("Start Workout stays hidden in a past week", !/Start Workout/.test(label));
 
-  /* Task 3 added sessionUnit so a weight typed into an earlier cycle is
-     stamped with THAT cycle's unit, not today's data.unit. That could not be
-     proven until the Log tab could reach an earlier cycle at all — it can
-     now, so prove it here: open the archived exercise (visible in every week
-     since exercises aren't per-cycle) and type a fresh weight, then check
-     which unit the newly stamped set carries. */
+  /* Phase 2's requirement is that daySessionInView actually resolves the
+     ARCHIVED session, so that week's logged sets appear. An "Old Press"
+     name match proved nothing: the exercise list is not cycle-scoped, so
+     the name renders in every week including the live one. Assert what only
+     the archived session can produce — the weight input holding its NATIVE
+     stored value (70, deliberately un-converted) under a column header and
+     placeholder reading kg, while data.unit is lb. In the live week that
+     input is blank and both read lb. */
   ok("archived exercise card opens", await clickText("Old Press")); await wait(600);
+  const archivedRow = await page.evaluate(() => {
+    const w = document.querySelector('input[aria-label="weight"]');
+    return {
+      value: w ? w.value : null,
+      placeholder: w ? w.placeholder : null,
+      header: (document.body.innerText.match(/weight \((kg|lb)\)/i) || [])[1] || "",
+      dataUnit: JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => /^franco-fit-[aj]-v\d$/.test(k)))).unit,
+    };
+  });
+  ok("the archived week's logged sets appear, in that cycle's own unit",
+     archivedRow.value === "70" && /^kg$/i.test(archivedRow.header)
+       && /^kg$/i.test(archivedRow.placeholder || "") && archivedRow.dataUnit === "lb",
+     `-> ${JSON.stringify(archivedRow)}`);
+
+  /* Task 3 added sessionUnit so a weight typed into an earlier cycle is
+     stamped with THAT cycle's unit, not today's data.unit. The archived
+     card is open on the archived week, so type over its first weight and
+     check which unit the set now carries. */
   await page.evaluate(() => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     const w = document.querySelector('input[aria-label="weight"]');
