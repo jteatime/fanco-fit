@@ -184,6 +184,13 @@ machinery Phase 1 of supersets already added.
   a wrong stamp is fixable by re-entering the weight.
 - Bodyweight units (`bwUnit`) — already independent and already correct.
 - Converting `weights` (bodyweight log) — it has its own unit field.
+- **Cross-build blobs.** `migrateUnits` dates a pre-stamp blob's archived
+  cycles from this build's `SEED_UNIT`, so pasting a JSON backup or entering
+  a sync code from the OTHER build stamps its kg history as lb (or the
+  reverse). Such a blob is already wrong to import — the two builds are
+  different people's data — but the JSON backup is the only undo for this
+  change, so the limitation is written down rather than assumed away. There
+  is no detection and no guard.
 
 ## Testing
 
