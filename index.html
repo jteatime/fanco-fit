@@ -366,7 +366,18 @@ const num = (v) => {
   const n = parseFloat(v);
   return isNaN(n) ? 0 : n;
 };
-const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.w) * num(s.r)), 0);
+/* ---- Units -------------------------------------------------------
+   A set stores the number the user typed, in whatever unit was current
+   at the time, plus a `u` stamp saying which. All volume math is done in
+   canonical kg so a kg-era session and an lb-era session can be compared
+   without lying about either; display converts back out.
+   An unstamped set is read as kg — after the migration only weightless
+   rows are unstamped, so this cannot misread real data, and it keeps
+   volumeOf total for a hand-edited blob. */
+const KG_PER_LB = 0.45359237;
+const kgOf = (s) => (s.u === "lb" ? num(s.w) * KG_PER_LB : num(s.w));
+const toUnit = (kg, unit) => (unit === "lb" ? kg / KG_PER_LB : kg);
+const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : kgOf(s) * num(s.r)), 0);
 const repsOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.r)), 0);
 const isBodyweight = (sets) => volumeOf(sets) === 0 && repsOf(sets) > 0;
 const scoreOf = (sets) => { const v = volumeOf(sets); return v > 0 ? v : repsOf(sets); };

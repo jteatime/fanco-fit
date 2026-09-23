@@ -5,7 +5,7 @@ const load = require("./harness.js");
 const FXX = require("./fixture.js");
 
 const REPO = path.join(__dirname, "..");
-const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows"];
+const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows", "kgOf", "toUnit", "volumeOf", "scoreOf"];
 
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
@@ -189,6 +189,34 @@ for (const file of ["index.html", "j.html"]) {
     eq("a stale supersetId on a collapsed single names nobody",
        M.partnersOf([ex("a", 3, "s1"), ex("c", 3)]), {});
     eq("empty list", M.partnersOf([]), {});
+  }
+
+  /* ---- canonical unit math ---- */
+  {
+    const s = (w, r, u) => ({ w, r, extra: false, tag: "", ...(u ? { u } : {}) });
+    eq("a kg set is already canonical", M.kgOf(s(100, 10, "kg")), 100);
+    eq("an lb set converts to kg", Math.round(M.kgOf(s(100, 10, "lb")) * 1000) / 1000, 45.359);
+    eq("an unstamped set is treated as kg", M.kgOf(s(100, 10)), 100);
+    eq("a blank weight is zero", M.kgOf(s("", 10, "lb")), 0);
+
+    eq("toUnit back to kg is identity", M.toUnit(100, "kg"), 100);
+    eq("toUnit to lb inverts kgOf", Math.round(M.toUnit(45.359237, "lb")), 100);
+
+    /* the actual defect: 70kg and 180lb must not be added as one quantity */
+    const mixed = [s(70, 10, "kg"), s(180, 10, "lb")];
+    const expected = 70 * 10 + 180 * 0.45359237 * 10;
+    ok("volumeOf converts before summing",
+       Math.abs(M.volumeOf(mixed) - expected) < 0.001,
+       `-> ${M.volumeOf(mixed).toFixed(2)} vs ${expected.toFixed(2)}`);
+    ok("the naive sum is NOT what we get", Math.abs(M.volumeOf(mixed) - 2500) > 1,
+       `-> naive would be 2500, got ${M.volumeOf(mixed).toFixed(2)}`);
+
+    eq("a skipped set contributes nothing",
+       M.volumeOf([{ w: 100, r: 10, skipped: true, u: "kg" }]), 0);
+
+    /* scoreOf's bodyweight fallback is a rep count and stays unitless */
+    eq("bodyweight sets still score as reps",
+       M.scoreOf([s("", 12, "lb"), s("", 10, "lb")]), 22);
   }
 
   /* ---- CSV: the Supersets block ---- */
