@@ -4,6 +4,7 @@
 const path = require("path");
 const puppeteer = require("puppeteer-core");
 const FX = require("./fixture.js");
+const { daySelector } = require("./day-select.js");
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FILE = process.argv[2] || "j.html";
@@ -78,6 +79,16 @@ const blob = {
   }, sel, idx, val);
 
   console.log(`\n== ${FILE} · single-exercise logging regression ==`);
+
+  /* The Log tab opens on defaultDay(), which is the fixture's training day
+     only 4 weekdays in 7 (see test/day-select.js). Every assertion in this
+     file reads that day's card, so pin it before asserting anything —
+     otherwise the whole suite cries wolf 3 days out of every 7. */
+  const { headerDay, selectDay } = daySelector(page, wait);
+  ok("the fixture's training day is selected", await selectDay(FD.day),
+     `-> header says ${await headerDay()}, want ${FD.day}`);
+  await wait(400);
+
   ok("app boots on the Log tab", /Test Press/.test(await txt()));
 
   ok("exercise card opens", await clickText("Test Press")); await wait(500);

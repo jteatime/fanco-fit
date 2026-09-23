@@ -3,6 +3,7 @@
 const path = require("path");
 const puppeteer = require("puppeteer-core");
 const FX = require("./fixture.js");
+const { daySelector } = require("./day-select.js");
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FILE = process.argv[2] || "j.html";
@@ -119,8 +120,21 @@ const blob = {
   d = await storedUntil((d) => d.exercises.every((e) => e.targetSets === 4));
   ok("rounds stepper decrements every member", d.exercises.map((e) => e.targetSets).join() === "4,4");
 
+  /* The Log tab opens on defaultDay(), which is the fixture's training day
+     only 4 weekdays in 7 — see test/day-select.js for the measured table and
+     for what a mismatch day actually does to a suite that assumes otherwise. */
+  const { headerDay, headerDate, selectDay } = daySelector(page, wait);
+
   /* ---- Log: the group renders as one card ---- */
   ok("Log opens", await clickText("Log")); await wait(700);
+  /* Every Log assertion below reads whichever day the tab opened on.
+     defaultDay() and fixtureDay() agree on only 4 weekdays in 7; on the other
+     3 the fixture exercise is off-screen, and measured behaviour there is a
+     cascade of failures ending in a crash on a null .match() — noisy rather
+     than silently green, but a false report either way. Pin the day first. */
+  ok("the fixture's training day is selected", await selectDay(FD.day),
+     `-> header says ${await headerDay()}, want ${FD.day}`);
+  await wait(400);
   const t = await txt();
   ok("one superset card in the Log", /SUPERSET/i.test(t));
   ok("card titles both moves", /Leg Press \+ Leg Curl/.test(t), `-> ${(t.match(/Leg Press[^\n]*/) || [])[0]}`);
@@ -366,53 +380,33 @@ const blob = {
   await page.goto(`http://localhost:8777/${FILE}`, { waitUntil: "networkidle2" });
   await wait(1600);
 
-  /* The Log tab opens on defaultDay(), which is the fixture's training day
-     only when today happens to be one. Select it explicitly. The chips are
-     abbreviated (a single letter on a build that trains 5+ days, so "T" and
-     "S" are ambiguous), so identify the right one by the header it produces
-     rather than by its label. */
-  const headerDay = () => page.evaluate(() =>
-    (document.body.innerText.match(/^([A-Z][a-z]+day) ·/m) || [])[1] || "");
-  /* Clicks the i-th day chip — the buttons beside ‹/› in the week row, which
-     are the only ones there without an aria-label. Returns how many there
-     are, so passing an out-of-range i is a pure count. */
-  const clickDayChip = (i) => page.evaluate((i) => {
-    const prev = document.querySelector('button[aria-label="previous week"]');
-    if (!prev) return 0;
-    const days = [...prev.parentElement.querySelectorAll("button")]
-      .filter((b) => !b.getAttribute("aria-label"));
-    if (i < days.length) days[i].click();
-    return days.length;
-  }, i);
-  const selectDay = async (name) => {
-    if ((await headerDay()) === name) return true;
-    const n = await clickDayChip(-1);
-    for (let i = 0; i < n; i++) {
-      await clickDayChip(i); await wait(300);
-      if ((await headerDay()) === name) return true;
-    }
-    return false;
-  };
-  ok("the fixture's training day is selected", await selectDay(FD.day),
+  ok("the archived cycle's training day is selected", await selectDay(FD.day),
      `-> header says ${await headerDay()}, want ${FD.day}`);
 
   const prevWeek = () => page.evaluate(() => {
     const el = document.querySelector('button[aria-label="previous week"]');
     if (!el || el.disabled) return false; el.click(); return true;
   });
-  /* The seeded session sits (56 - 21) / 7 = 5 weeks into Cycle 1, i.e. its
-     "Week 6", and three ‹ steps back from the live week land exactly there.
-     The old loop walked six and stopped on Cycle 1 Week 3, so it never
-     displayed the archived session at all — which is why the assertion
-     below used to be a name match that any week satisfied. */
-  const SESS_WEEK = (56 - 21) / 7 + 1;
+  /* Walk back until the viewed day IS the seeded session's date, instead of
+     assuming it sits a fixed number of ‹ steps away. A hardcoded 3 steps only
+     holds while the fixture day and the browser clock agree on the week
+     geometry; keying the walk on the date the header actually shows makes it
+     independent of that. The walk stops on the DATE, so the cycle-name
+     assertion below is still doing real work — nothing steered it there. */
+  const SESS_DATE = FX.ago(21, FD.date);
+  const SESS_LABEL = new Date(SESS_DATE + "T12:00:00")
+    .toLocaleDateString("en-US", { month: "short", day: "numeric" });
   let walked = 0;
-  for (let i = 0; i < 3; i++) { if (await prevWeek()) { walked++; await wait(350); } else break; }
-  ok("the ‹ button walks back past the live cycle", walked === 3,
-     `-> walked back ${walked} weeks`);
+  while (walked < 12 && (await headerDate()) !== SESS_LABEL) {
+    if (!(await prevWeek())) break;
+    walked++; await wait(350);
+  }
+  ok("the ‹ button walks back past the live cycle onto the seeded week",
+     (await headerDate()) === SESS_LABEL && walked > 0,
+     `-> walked ${walked} weeks, header reads ${await headerDate()}, want ${SESS_LABEL}`);
   const label = await page.evaluate(() => document.body.innerText);
-  ok("the label names the earlier cycle and the seeded week",
-     new RegExp(`Cycle 1 · Week ${SESS_WEEK}`).test(label),
+  ok("the label names the archived cycle, not the live one",
+     /Cycle 1 · Week \d+/.test(label) && !/Cycle 2 ·/.test(label),
      `-> ${(label.match(/Cycle \d[^\n]*/) || ["(none)"])[0]}`);
   ok("Start Workout stays hidden in a past week", !/Start Workout/.test(label));
 

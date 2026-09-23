@@ -18,7 +18,21 @@ const SHARED_TRAINING_DAYS = ["Tuesday", "Wednesday", "Friday", "Sunday"];
 const pad = (n) => String(n).padStart(2, "0");
 const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-const TODAY = isoOf(new Date());
+/* FIXTURE_TODAY=YYYY-MM-DD pins the fixture's idea of today, so a suite can be
+ * replayed against a weekday other than the one the clock happens to be on.
+ *
+ * It is faithful for the Node suites, which never consult a clock of their own.
+ * For the two puppeteer suites it is a PARTIAL simulation: the page keeps the
+ * real system clock, so this varies the *relationship* between the fixture day
+ * and defaultDay() — which is what it was added to reproduce — but it does not
+ * move the app's "today". Shift the fixture into a different calendar week and
+ * the app writes its logged sets to the real today's session key while the
+ * assertions look up the shifted one, which reads as a crash that is an
+ * artifact of this override, not a defect in the suite. Faking the page clock
+ * too would make a real 7-weekday sweep possible; deliberately not done here. */
+const TODAY = /^\d{4}-\d{2}-\d{2}$/.test(process.env.FIXTURE_TODAY || "")
+  ? process.env.FIXTURE_TODAY
+  : isoOf(new Date());
 
 /* n days before `from` (default today), as an ISO date. */
 function ago(n, from = TODAY) {
