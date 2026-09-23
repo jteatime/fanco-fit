@@ -24,7 +24,20 @@ const blob = {
     { id: "curl", day: FD.day, name: "Leg Curl", prev: 40, targetSets: 3, repGoal: 12,
       variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" },
   ],
-  sessions: {},
+  /* prior week, deliberately light, so today's work clearly beats it —
+     without history nothing is "beating" and the burst can never fire */
+  sessions: {
+    [`${FX.weeksBefore(1, FD.date)}|${FD.day}`]: {
+      date: FX.weeksBefore(1, FD.date), day: FD.day, celebrated: true, entries: {
+        press: { variantId: "main", note: "", swapName: "", sets: [
+          { w: 50, r: 5, extra: false, tag: "" }, { w: 50, r: 5, extra: false, tag: "" },
+          { w: 50, r: 5, extra: false, tag: "" }, { w: 50, r: 5, extra: false, tag: "" }] },
+        curl: { variantId: "main", note: "", swapName: "", sets: [
+          { w: 40, r: 5, extra: false, tag: "" }, { w: 40, r: 5, extra: false, tag: "" },
+          { w: 40, r: 5, extra: false, tag: "" }, { w: 40, r: 5, extra: false, tag: "" }] },
+      },
+    },
+  },
 };
 
 (async () => {
@@ -132,12 +145,14 @@ const blob = {
   await fill(1, "50", "12");
 
   d = await storedUntil((d) => {
-    const k = Object.keys(d.sessions)[0];
+    const k = Object.keys(d.sessions).find((x) => x.startsWith(FD.date));
     const e = k && d.sessions[k].entries;
     return !!(e && e.press && e.curl && e.press.sets[0] && String(e.press.sets[0].r) === "10"
       && e.curl.sets[0] && String(e.curl.sets[0].r) === "12");
   });
-  const key = Object.keys(d.sessions)[0];
+  /* today's session specifically — the fixture also carries prior-week
+     history, so [0] would read the wrong one */
+  const key = Object.keys(d.sessions).find((k) => k.startsWith(FD.date));
   const e = d.sessions[key].entries;
   ok("both members got their own entry", !!e.press && !!e.curl, `-> ${Object.keys(e).join()}`);
   ok("press round 1 landed on press", String(e.press.sets[0].w) === "100" && String(e.press.sets[0].r) === "10",
@@ -167,6 +182,38 @@ const blob = {
   await page.setViewport({ width: 420, height: 950, deviceScaleFactor: 2 });
   await wait(500);
 
+  /* Finishing a superset earns the confetti a lone exercise gets. Round 1 is
+     already logged above at 100/10 — fill only the LATER rounds so the
+     "logged sets survive the unlink" assertion still sees 100/10 in set 0. */
+  const inputCount = await page.evaluate(() => document.querySelectorAll('input[aria-label="reps"]').length);
+  for (let i = 2; i < inputCount; i++) {
+    await page.evaluate((i) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      const ws = document.querySelectorAll('input[aria-label="weight"]');
+      const rs = document.querySelectorAll('input[aria-label="reps"]');
+      if (ws[i]) { setter.call(ws[i], "200"); ws[i].dispatchEvent(new Event("input", { bubbles: true })); }
+      if (rs[i]) { setter.call(rs[i], "20"); rs[i].dispatchEvent(new Event("input", { bubbles: true })); }
+    }, i);
+    await wait(110);
+  }
+  await wait(500);
+  const burst = await page.evaluate(() => document.querySelectorAll(".ll-mini").length);
+  ok("finishing the superset fires the confetti burst", burst > 0,
+     `-> ${burst} particles across ${inputCount} inputs`);
+  await wait(1100);
+  ok("the burst clears itself", (await page.evaluate(() => document.querySelectorAll(".ll-mini").length)) === 0);
+
+  /* The Progress card for a paired exercise names its partner — checked while
+     still linked, since unlinking later removes the pairing. */
+  ok("Progress opens while still linked", await clickText("Progress")); await wait(900);
+  const marker = await page.evaluate(() => {
+    const t = document.body.innerText;
+    return { press: /🔗 with Leg Curl/.test(t), curl: /🔗 with Leg Press/.test(t) };
+  });
+  ok("Progress marks Leg Press as paired with Leg Curl", marker.press, `-> ${JSON.stringify(marker)}`);
+  ok("and Leg Curl as paired with Leg Press", marker.curl);
+  ok("back to Log", await clickText("Log")); await wait(700);
+
   /* ---- Manage: ✎ inside the group block actually edits a member ---- */
   ok("Manage reopens for the edit check", await clickText("Manage")); await wait(700);
   ok("clicked ✎ on a grouped member", await clickText("✎"));
@@ -191,7 +238,7 @@ const blob = {
   d = await storedUntil((d) => d.exercises.every((x) => !x.supersetId));
   ok("supersetId cleared from both", d.exercises.every((x) => !x.supersetId));
   ok("planned sets survive the unlink", d.exercises.map((x) => x.targetSets).join() === "4,4");
-  const pressAfterUnlink = d.sessions[Object.keys(d.sessions)[0]].entries.press;
+  const pressAfterUnlink = d.sessions[Object.keys(d.sessions).find((k) => k.startsWith(FD.date))].entries.press;
   ok("logged sets survive the unlink",
      String(pressAfterUnlink.sets[0].w) === "100" && String(pressAfterUnlink.sets[0].r) === "10",
      `-> ${JSON.stringify(pressAfterUnlink.sets[0])}`);
@@ -199,6 +246,7 @@ const blob = {
   ok("Log shows two separate cards again", await clickText("Log")); await wait(700);
   const t2 = await txt();
   ok("superset tag gone", !/SUPERSET/i.test(t2));
+
 
   /* The Progress tab's stat strip and charts default to ALL TIME, not the live
      cycle — a freshly started cycle would otherwise open on an empty strip.

@@ -192,5 +192,39 @@ for (const file of ["index.html", "j.html"]) {
   ok("now marker advances past the completed round", />Round 2 — now</.test(skipOpen));
 }
 
+/* ---- the "other machine" fallback in a member's detail panel ----
+   A lone exercise shows "Other machine, <date>: ..." when it has no history
+   on the machine it is currently set to. SupersetCard dead-ended at "No
+   history on X", leaving a member's first session on a new machine with no
+   reference at all. */
+for (const file of ["index.html", "j.html"]) {
+  const M = loadWithRealReact(file, ["SupersetCard", "groupedExercises", "applyTheme", "applySchedule", "T"]);
+  const data = mkBlob();
+  M.applySchedule(undefined);
+  M.applyTheme("iron");
+  /* press gains a second machine and is switched to it: no history there,
+     but its history on the original machine should still be offered */
+  const press = data.exercises.find((e) => e.id === "press");
+  press.variants = [{ id: "main", name: "Usual machine" }, { id: "plate", name: "Plate loaded" }];
+  press.activeVariant = "plate";
+  /* the live entry's variantId wins over activeVariant, so switch it there too
+     — otherwise the card still resolves history on the original machine */
+  data.sessions[`${FD.date}|${FD.day}`].entries.press.variantId = "plate";
+  const g = M.groupedExercises(data.exercises.filter((e) => e.day === FD.day))[0];
+  const panel = renderToStaticMarkup(React.createElement(M.SupersetCard, {
+    data, update: () => {}, group: g, sessionKey: `${FD.date}|${FD.day}`,
+    dayColor: "#69B56D", isDeload: false, initialOpen: true, initialDetail: "press",
+  }));
+  console.log(`\n== ${file} · other-machine fallback ==`);
+  ok("panel says there is no history on the new machine", /No history on Plate loaded/.test(panel));
+  ok("and offers the other machine's last session", /Other machine,/.test(panel),
+     `-> ${(panel.match(/Other machine,[^<]*/) || ["(absent)"])[0]}`);
+  const region = (panel.match(/Other machine,[\s\S]{0,140}/) || [""])[0].replace(/<[^>]+>/g, " ");
+  ok("naming the actual sets from that machine", /90/.test(region) && /12/.test(region),
+     `-> ${region.trim().slice(0, 70)}`);
+  /* the unswitched member still reports its own history normally */
+  ok("the other member is unaffected", /Leg Curl/.test(panel));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

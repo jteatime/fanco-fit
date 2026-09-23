@@ -2,9 +2,10 @@
 const path = require("path");
 const os = require("os");
 const load = require("./harness.js");
+const FXX = require("./fixture.js");
 
 const REPO = path.join(__dirname, "..");
-const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup"];
+const API = ["groupedExercises", "supersetRounds", "linkSuperset", "unlinkSuperset", "setSupersetRounds", "moveExerciseGroup", "partnersOf", "buildSheetRows"];
 
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
@@ -12,6 +13,10 @@ const eq = (name, got, want) => {
   ok ? pass++ : fail++;
   console.log(ok ? `  ok   ${name}` :
     `FAIL   ${name}\n        got  ${JSON.stringify(got)}\n        want ${JSON.stringify(want)}`);
+};
+const ok = (name, cond, note = "") => {
+  cond ? pass++ : fail++;
+  console.log(`${cond ? "  ok  " : "FAIL  "} ${name} ${note}`);
 };
 
 /* Minimal exercise shape: only the fields grouping reads. */
@@ -167,6 +172,49 @@ for (const file of ["index.html", "j.html"]) {
        list.map((e) => e.id), ["f1", "y", "f2", "a", "f3", "b"]);
     eq("other days' exercises are untouched objects",
        list.filter((e) => e.day === "Friday").map((e) => e.id), ["f1", "f2", "f3"]);
+  }
+
+  /* ---- partnersOf: what the Progress 🔗 marker reads ---- */
+  {
+    const list = [ex("a", 3, "s1"), ex("b", 3, "s1"), ex("c", 3)];
+    eq("partnersOf names the partner both ways",
+       M.partnersOf(list), { a: ["b"], b: ["a"] });
+    eq("partnersOf ignores an unpaired exercise", "c" in M.partnersOf(list), false);
+
+    const tri = [ex("a", 3, "s1"), ex("b", 3, "s1"), ex("d", 3, "s1")];
+    eq("a triset member names both partners", M.partnersOf(tri).a, ["b", "d"]);
+
+    /* the reason this goes through groupedExercises: a lone exercise still
+       carrying a supersetId must NOT claim a partner */
+    eq("a stale supersetId on a collapsed single names nobody",
+       M.partnersOf([ex("a", 3, "s1"), ex("c", 3)]), {});
+    eq("empty list", M.partnersOf([]), {});
+  }
+
+  /* ---- CSV: the Supersets block ---- */
+  {
+    const mk = (id, name, sets, ss) => ({ ...ex(id, sets, ss), name, prev: 70, repGoal: 10 });
+    const paired = {
+      version: 1, unit: "kg", userName: "T", nameAsked: true, theme: "iron", rewardId: "gold-star",
+      weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {}, deloadWeeks: [], deloadPlan: {},
+      cycleHistory: [], cycleNumber: 1, cycleName: "Cycle 1", cycleWeeks: 8,
+      cycleStart: FXX.ago(21), sessions: {},
+      exercises: [mk("p", "Leg Press", 4, "s1"), mk("c", "Leg Curl", 4, "s1"), mk("z", "Calf Raise", 3)],
+    };
+    const flat = M.buildSheetRows(paired).map((r) => (r || []).join("|"));
+    eq("export gains a Supersets block", flat.includes("Supersets"), true);
+    eq("its header names the columns", flat.includes("Day|Exercises|Rounds"), true);
+    ok("it lists the pair once with its round count",
+       flat.filter((r) => /Leg Press \+ Leg Curl\|4$/.test(r)).length === 1,
+       `-> ${flat.filter((r) => /Leg Press \+ Leg Curl/.test(r)).join(" ;; ")}`);
+    ok("the unpaired exercise is not in the block",
+       !flat.some((r) => /^\w+day\|Calf Raise/.test(r)));
+
+    /* an export with no supersets must be byte-identical to before */
+    const unpaired = JSON.parse(JSON.stringify(paired));
+    unpaired.exercises.forEach((e) => { delete e.supersetId; });
+    const flatU = M.buildSheetRows(unpaired).map((r) => (r || []).join("|"));
+    eq("no supersets -> no Supersets block at all", flatU.includes("Supersets"), false);
   }
 }
 
