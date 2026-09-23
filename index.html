@@ -1187,8 +1187,13 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
       const oldW = String(e.sets[i].w ?? "");
       /* Stamp the unit the moment a weight exists. Clearing a weight drops
          the stamp too, so a re-entry in a different unit is not mislabelled. */
+      /* A NEW number belongs to this session's unit. ns.u is the OLD stamp and
+         select-all-and-type never passes through empty, so keeping it would
+         leave an edited 180 -> 80 stamped lb forever — stamps are
+         authoritative and never re-derived. */
+      const wChanged = String(ns.w ?? "") !== oldW;
       if (num(ns.w) > 0) {
-        e.sets[i] = { ...ns, u: ns.u || sessionUnit };
+        e.sets[i] = { ...ns, u: wChanged ? sessionUnit : (ns.u || sessionUnit) };
       } else {
         const { u, ...rest } = ns;
         e.sets[i] = rest;
@@ -1209,7 +1214,14 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
     update((d) => {
       const e = ensureEntry(d);
       const lastWeighted = [...e.sets].reverse().find((s) => num(s.w) > 0);
-      e.sets.push({ w: lastWeighted ? lastWeighted.w : "", r: "", extra: true, tag: "" });
+      /* Copying a weight copies its unit: an unstamped weighted set would read
+         as kg until the next load stamped it, moving today's volume, the
+         semantic strip colour and the weekly record under the user. A
+         weightless extra row stays unstamped — it gets its unit when a weight
+         is first typed, which is the designed behaviour. */
+      e.sets.push(lastWeighted
+        ? { w: lastWeighted.w, r: "", extra: true, tag: "", u: lastWeighted.u || sessionUnit }
+        : { w: "", r: "", extra: true, tag: "" });
     });
 
   const setSkipAll = (v) => update((d) => { ensureEntry(d).skippedAll = v; });
