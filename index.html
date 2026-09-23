@@ -703,6 +703,7 @@ function archiveCurrentCycle(d, endIso) {
     end: endIso,
     weeks: Math.max(d.cycleWeeks || 8, weeksBetween(d.cycleStart, endIso)),
     deloadWeeks: (d.deloadWeeks || []).slice(),
+    unit: d.unit,
   });
 }
 
@@ -756,15 +757,22 @@ const SEED_UNIT = "lb";
    on it keep their signatures.
 
    Idempotent — it runs on every load. A set that already carries `u` is
-   authoritative and is never rewritten, and no stored weight is modified. */
+   authoritative and is never rewritten, and no stored weight is modified.
+
+   Known gap: this assumes the unit only ever changes at a cycle boundary.
+   A unit switch mid-cycle would mis-stamp every set logged before the
+   switch within that same cycle, and nothing here can detect that case. */
 function migrateUnits(d) {
   const views = cycleViews(d);
   for (const c of (d.cycleHistory || [])) {
     if (!c.unit) c.unit = SEED_UNIT;
   }
   const unitAt = (iso) => {
-    const v = viewFor(cycleViews(d), iso);
-    if (!v) return d.unit || SEED_UNIT;
+    const v = viewFor(views, iso);
+    /* No view at all only happens for a date before the earliest archived
+       cycle (the live view has no end, so it matches everything from
+       cycleStart onward) — i.e. old history, which is SEED_UNIT's case. */
+    if (!v) return (d.cycleStart && iso < d.cycleStart) ? SEED_UNIT : (d.unit || SEED_UNIT);
     if (v.isCurrent) return d.unit || SEED_UNIT;
     const rec = (d.cycleHistory || []).find((c) => c.number === v.number);
     return (rec && rec.unit) || SEED_UNIT;
@@ -3253,6 +3261,7 @@ function ManageView({ data, update, reseed, restore }) {
         if (last) {
           const top = Math.max(...last.entry.sets.map((s) => num(s.w)));
           ex.prev = isFinite(top) ? top : ex.prev;
+          ex.prevU = d.unit;
         }
       });
       /* Freeze the outgoing cycle so Progress can still page back to it.
@@ -4189,7 +4198,7 @@ function App() {
           <ProgressView data={data} update={update} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { migrateCycleHistory(next); applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { migrateCycleHistory(next); migrateUnits(next); applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (

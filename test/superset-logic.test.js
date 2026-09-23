@@ -229,8 +229,13 @@ for (const file of ["index.html", "j.html"]) {
     const FD2 = FXX.fixtureDay();
     const OLD = FXX.weeksBefore(6, FD2.date);   /* inside the archived cycle */
     const NEW = FD2.date;                        /* inside the live cycle */
+    /* Deliberately crossed against SEED_UNIT so the archived-vs-live
+       distinction is meaningful on BOTH files' passes through this loop —
+       on index.html SEED_UNIT === "lb", so a live unit hardcoded to "lb"
+       would pass even if the code wrongly read d.unit for archived sets. */
+    const LIVE_UNIT = M.SEED_UNIT === "kg" ? "lb" : "kg";
     const mk = () => ({
-      version: 1, unit: "lb", userName: "T", nameAsked: true, theme: "iron",
+      version: 1, unit: LIVE_UNIT, userName: "T", nameAsked: true, theme: "iron",
       rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
       deloadWeeks: [], deloadPlan: {},
       cycleHistory: [{ number: 1, name: "Cycle 1", start: FXX.ago(120, FD2.date),
@@ -249,7 +254,7 @@ for (const file of ["index.html", "j.html"]) {
        d.sessions[`${OLD}|${FD2.day}`].entries.a.sets.map((s) => s.u),
        [M.SEED_UNIT, M.SEED_UNIT]);
     eq("live-cycle sets take the current unit",
-       d.sessions[`${NEW}|${FD2.day}`].entries.a.sets.map((s) => s.u), ["lb", "lb"]);
+       d.sessions[`${NEW}|${FD2.day}`].entries.a.sets.map((s) => s.u), [LIVE_UNIT, LIVE_UNIT]);
     eq("ex.prevU is stamped from the outgoing cycle",
        d.exercises[0].prevU, M.SEED_UNIT);
 
@@ -262,11 +267,16 @@ for (const file of ["index.html", "j.html"]) {
     const once = JSON.stringify(d);
     eq("migration is idempotent", JSON.stringify(M.migrateUnits(d)), once);
 
-    /* an existing stamp is authoritative and never overwritten */
+    /* an existing stamp is authoritative and never overwritten — model a
+       partially-migrated (e.g. interrupted-load) set: one sibling already
+       stamped with the "wrong" (live) unit, the other still bare. */
     const pre = mk();
-    pre.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u = "lb";
+    pre.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u = LIVE_UNIT;
+    const migratedPre = M.migrateUnits(pre);
     eq("a pre-existing stamp survives",
-       M.migrateUnits(pre).sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u, "lb");
+       migratedPre.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u, LIVE_UNIT);
+    eq("its unstamped sibling still gets migrated correctly",
+       migratedPre.sessions[`${OLD}|${FD2.day}`].entries.a.sets[1].u, M.SEED_UNIT);
 
     /* a weightless row stays unstamped until a weight is typed */
     const blank = mk();
@@ -281,7 +291,7 @@ for (const file of ["index.html", "j.html"]) {
     const sd = M.migrateUnits(single);
     eq("no archived cycles -> all sets take the live unit",
        [sd.sessions[`${OLD}|${FD2.day}`].entries.a.sets[0].u,
-        sd.sessions[`${NEW}|${FD2.day}`].entries.a.sets[0].u], ["lb", "lb"]);
+        sd.sessions[`${NEW}|${FD2.day}`].entries.a.sets[0].u], [LIVE_UNIT, LIVE_UNIT]);
   }
 
   /* ---- CSV: the Supersets block ---- */
