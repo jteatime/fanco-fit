@@ -1115,7 +1115,12 @@ Then in `TodayView`'s day-pill map, pass the resolved view:
           const st = dayWeekStatus(data, d, wIdx, wView);
 ```
 
-`CycleGrid` already calls `dayWeekStatus` with its own view available; pass it there too so both callers agree.
+**There is a second call site, and it is not `CycleGrid`.** `CycleGrid` has its
+own inline view-scoped logic and never calls `dayWeekStatus`. The other caller
+is `ProgressView`'s day-pill strip, which passes no view and so always reports
+live-cycle status even while the grid below it browses an archived cycle —
+pre-existing, and outside this task's scope, but `grep -n "dayWeekStatus("`
+before assuming coverage is complete.
 
 - [ ] **Step 6: Keep Start/Finish out of past weeks**
 
