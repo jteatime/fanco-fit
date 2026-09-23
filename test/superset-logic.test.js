@@ -337,17 +337,16 @@ for (const file of ["index.html", "j.html"]) {
         entries: { a: { variantId: "main", note: "", swapName: "", sets: [st(180, 9, "lb")] } } } },
     };
     const flat = M.buildSheetRows(mixed).map((r) => (r || []).join("|"));
-    eq("a mixed-unit export gains a Units block", flat.includes("Units"), true);
+    eq("the export states its unit", flat.includes("Units"), true);
     eq("its header names the columns", flat.includes("Cycle|Unit"), true);
-    ok("it records the archived cycle's unit", flat.some((r) => /^Cycle 1\|kg$/.test(r)),
+    ok("it names the LIVE cycle and its unit",
+       flat.some((r) => /^Cycle 2\|lb$/.test(r)),
        `-> ${flat.filter((r) => /\|(kg|lb)$/.test(r)).join(" ;; ")}`);
-    ok("and the live cycle's unit", flat.some((r) => /^Cycle 2\|lb$/.test(r)));
-
-    /* one unit everywhere -> no block, so a single-unit export is unchanged */
-    const same = JSON.parse(JSON.stringify(mixed));
-    same.cycleHistory[0].unit = "lb";
-    eq("a single-unit export has no Units block",
-       M.buildSheetRows(same).map((r) => (r || []).join("|")).includes("Units"), false);
+    /* the archived cycle's numbers are not in this sheet, so it must not be
+       listed as though they were */
+    ok("it does NOT list the archived cycle", !flat.some((r) => /^Cycle 1\|/.test(r)),
+       `-> ${flat.filter((r) => /^Cycle \d\|/.test(r)).join(" ;; ")}`);
+    eq("exactly one cycle row", flat.filter((r) => /^Cycle \d\|(kg|lb)$/.test(r)).length, 1);
   }
 }
 
