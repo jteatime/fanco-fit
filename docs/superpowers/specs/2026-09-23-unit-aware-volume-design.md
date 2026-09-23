@@ -145,10 +145,18 @@ hand an lb row a kg-scaled target.
 ### CSV export
 
 Grid cells keep each set's native value — the export is a record of what was
-logged. A small `Units` block (`Cycle | Unit`) is appended alongside the
-existing `Supersets` block so the sheet is self-describing rather than
-silently mixed. Omitted when every cycle shares one unit, keeping a
-single-unit export byte-identical to today's.
+logged — so the sheet must say which unit those numbers are in.
+
+**Corrected during implementation:** this originally specified one row per
+cycle, omitted when all cycles shared a unit. That was wrong on both counts.
+`buildSheetRows` computes weeks relative to `data.cycleStart`, so
+archived-cycle sessions fall to negative week indices and appear in no grid
+cell, and the download is named `franco-fit-cycle-<N>.csv` — the export is a
+**single-cycle sheet**. Listing every cycle described data absent from the
+file. The block is therefore scoped to the live cycle and emitted
+unconditionally, since a reader of a bare number needs the unit whether or
+not anything is mixed. A unit switch partway through the live cycle still
+cannot be expressed, which is the same known gap `migrateUnits` documents.
 
 ## Phase 2 — Log navigation across cycles
 
