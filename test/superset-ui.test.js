@@ -3,6 +3,7 @@
 const path = require("path");
 const puppeteer = require("puppeteer-core");
 const FX = require("./fixture.js");
+const { daySelector } = require("./day-select.js");
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FILE = process.argv[2] || "j.html";
@@ -119,8 +120,21 @@ const blob = {
   d = await storedUntil((d) => d.exercises.every((e) => e.targetSets === 4));
   ok("rounds stepper decrements every member", d.exercises.map((e) => e.targetSets).join() === "4,4");
 
+  /* The Log tab opens on defaultDay(), which is the fixture's training day
+     only 4 weekdays in 7 — see test/day-select.js for the measured table and
+     for what a mismatch day actually does to a suite that assumes otherwise. */
+  const { headerDay, headerDate, selectDay } = daySelector(page, wait);
+
   /* ---- Log: the group renders as one card ---- */
   ok("Log opens", await clickText("Log")); await wait(700);
+  /* Every Log assertion below reads whichever day the tab opened on.
+     defaultDay() and fixtureDay() agree on only 4 weekdays in 7; on the other
+     3 the fixture exercise is off-screen, and measured behaviour there is a
+     cascade of failures ending in a crash on a null .match() — noisy rather
+     than silently green, but a false report either way. Pin the day first. */
+  ok("the fixture's training day is selected", await selectDay(FD.day),
+     `-> header says ${await headerDay()}, want ${FD.day}`);
+  await wait(400);
   const t = await txt();
   ok("one superset card in the Log", /SUPERSET/i.test(t));
   ok("card titles both moves", /Leg Press \+ Leg Curl/.test(t), `-> ${(t.match(/Leg Press[^\n]*/) || [])[0]}`);
@@ -159,6 +173,44 @@ const blob = {
      `-> ${JSON.stringify(e.press.sets[0])}`);
   ok("curl round 1 landed on curl", String(e.curl.sets[0].w) === "50" && String(e.curl.sets[0].r) === "12",
      `-> ${JSON.stringify(e.curl.sets[0])}`);
+
+  /* Every set the cascade fills is a real logged weight and must carry the
+     unit stamp — not just the one index the user typed into. */
+  const allStamped = await page.evaluate((k, date) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions).find((x) => x.startsWith(date));
+    const e = d.sessions[key].entries;
+    const weighted = [...e.press.sets, ...e.curl.sets].filter((s) => Number(s.w) > 0);
+    return { n: weighted.length, unstamped: weighted.filter((s) => !s.u).length, unit: d.unit };
+  }, KEY, FD.date);
+  ok("every cascaded set carries a unit stamp", allStamped.n > 1 && allStamped.unstamped === 0,
+     `-> ${allStamped.n} weighted sets, ${allStamped.unstamped} unstamped`);
+
+  /* Clearing a weight must drop the stamp, so re-entering in another unit
+     is not mislabelled. Restored immediately after — later assertions
+     ("logged sets survive the unlink") depend on set 0 staying 100/10. */
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const w = document.querySelectorAll('input[aria-label="weight"]')[0];
+    setter.call(w, ""); w.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await wait(900);
+  const cleared = await page.evaluate((k, date) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions).find((x) => x.startsWith(date));
+    return "u" in d.sessions[key].entries.press.sets[0];
+  }, KEY, FD.date);
+  ok("clearing a weight drops its unit stamp", cleared === false, `-> "u" present: ${cleared}`);
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const w = document.querySelectorAll('input[aria-label="weight"]')[0];
+    setter.call(w, "100"); w.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await storedUntil((d) => {
+    const k = Object.keys(d.sessions).find((x) => x.startsWith(FD.date));
+    const en = k && d.sessions[k].entries;
+    return !!(en && en.press && String(en.press.sets[0].w) === "100");
+  });
   ok("no volume merged between members", e.press.sets.length === 4 && e.curl.sets.length === 4,
      `-> ${e.press.sets.length}/${e.curl.sets.length}`);
   ok("round 1 marks complete", /Round 1[\s\S]{0,40}✓/i.test(await txt()));
@@ -212,6 +264,46 @@ const blob = {
   });
   ok("Progress marks Leg Press as paired with Leg Curl", marker.press, `-> ${JSON.stringify(marker)}`);
   ok("and Leg Curl as paired with Leg Press", marker.curl);
+
+  /* The whole point: an all-time volume figure must not jump when the unit
+     changes. Switching unit re-scales what is DISPLAYED and must leave every
+     stored weight and stamp untouched. */
+  const before = await page.evaluate((k) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions)[0];
+    const e = Object.values(d.sessions[key].entries)[0];
+    return { unit: d.unit, w: String(e.sets[0].w), u: e.sets[0].u };
+  }, KEY);
+  ok("Manage opens for the unit switch", await clickText("Manage")); await wait(700);
+  /* Manage has TWO kg/lb rows — "Lifting" (data.unit) and "Bodyweight"
+     (data.bwUnit) — and neither carries aria-pressed; the active one is
+     marked by an "on" class. Scope to the Lifting row or this flips the
+     wrong field. */
+  const flipped = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("div")]
+      .filter((d) => /^Lifting\s*(kg|lb)\s*(kg|lb)\s*$/.test((d.textContent || "").replace(/\s+/g, " ").trim()));
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const btn = [...row.querySelectorAll("button")]
+      .find((b) => /^(kg|lb)$/.test((b.textContent || "").trim()) &&
+                   !String(b.className).split(/\s+/).includes("on"));
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  ok("found the inactive Lifting unit button", flipped); await wait(900);
+  const after = await page.evaluate((k) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const key = Object.keys(d.sessions)[0];
+    const e = Object.values(d.sessions[key].entries)[0];
+    return { unit: d.unit, w: String(e.sets[0].w), u: e.sets[0].u };
+  }, KEY);
+  ok("the display unit changed", after.unit !== before.unit, `-> ${before.unit} -> ${after.unit}`);
+  ok("the stored weight did NOT change", after.w === before.w, `-> ${before.w} -> ${after.w}`);
+  ok("the stored stamp did NOT change", after.u === before.u, `-> ${before.u} -> ${after.u}`);
+  const bw = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)).bwUnit, KEY);
+  ok("the bodyweight unit was not collaterally flipped", bw === "lb", `-> bwUnit=${bw}`);
+
   ok("back to Log", await clickText("Log")); await wait(700);
 
   /* ---- Manage: ✎ inside the group block actually edits a member ---- */
@@ -263,6 +355,122 @@ const blob = {
      `-> ${JSON.stringify(scopeState)}`);
   ok("the cycle scope is not the default", scopeState.some((b) => /cycle/i.test(b.label) && b.pressed === "false"),
      `-> ${JSON.stringify(scopeState)}`);
+
+  /* The Log tab must reach earlier cycles. Seed an archived cycle with a
+     session in it, then walk back with the ‹ button. */
+  const archived = {
+    version: 1, unit: "lb", userName: "T", nameAsked: true, theme: "iron",
+    rewardId: "gold-star", weights: {}, bwUnit: "lb", sentNotes: [], noteAcks: {},
+    deloadWeeks: [], deloadPlan: {},
+    cycleHistory: [{ number: 1, name: "Cycle 1", start: FX.ago(56, FD.date),
+                     end: FX.ago(14, FD.date), weeks: 6, deloadWeeks: [], unit: "kg" }],
+    cycleNumber: 2, cycleName: "Cycle 2", cycleWeeks: 8, cycleStart: FX.ago(13, FD.date),
+    exercises: [{ id: "a", day: FD.day, name: "Old Press", prev: 70, targetSets: 2, repGoal: 10,
+                  variants: [{ id: "main", name: "Usual machine" }], activeVariant: "main" }],
+    sessions: {
+      /* Deliberately NOT celebrated. A celebrated session hides Start Workout
+         on its own, which would make the "Start Workout stays hidden in a past
+         week" assertion below pass without ever exercising the weekOffset===0
+         gate — and that gate is the only thing keeping the view-relative wIdx
+         safe for daySessionIn/isDeloadWeek/exListFor. */
+      [`${FX.ago(21, FD.date)}|${FD.day}`]: {
+        date: FX.ago(21, FD.date), day: FD.day,
+        entries: { a: { variantId: "main", note: "", swapName: "",
+          sets: [{ w: 70, r: 12, extra: false, tag: "", u: "kg" },
+                 { w: 70, r: 10, extra: false, tag: "", u: "kg" }] } },
+      },
+    },
+  };
+  await page.evaluate((k, v) => { localStorage.clear(); localStorage.setItem(k, v); }, KEY, JSON.stringify(archived));
+  await page.goto(`http://localhost:8777/${FILE}`, { waitUntil: "networkidle2" });
+  await wait(1600);
+
+  ok("the archived cycle's training day is selected", await selectDay(FD.day),
+     `-> header says ${await headerDay()}, want ${FD.day}`);
+
+  const prevWeek = () => page.evaluate(() => {
+    const el = document.querySelector('button[aria-label="previous week"]');
+    if (!el || el.disabled) return false; el.click(); return true;
+  });
+  /* Walk back until the viewed day IS the seeded session's date, instead of
+     assuming it sits a fixed number of ‹ steps away. A hardcoded 3 steps only
+     holds while the fixture day and the browser clock agree on the week
+     geometry; keying the walk on the date the header actually shows makes it
+     independent of that. The walk stops on the DATE, so the cycle-name
+     assertion below is still doing real work — nothing steered it there. */
+  const SESS_DATE = FX.ago(21, FD.date);
+  const SESS_LABEL = new Date(SESS_DATE + "T12:00:00")
+    .toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  let walked = 0;
+  while (walked < 12 && (await headerDate()) !== SESS_LABEL) {
+    if (!(await prevWeek())) break;
+    walked++; await wait(350);
+  }
+  ok("the ‹ button walks back past the live cycle onto the seeded week",
+     (await headerDate()) === SESS_LABEL && walked > 0,
+     `-> walked ${walked} weeks, header reads ${await headerDate()}, want ${SESS_LABEL}`);
+  const label = await page.evaluate(() => document.body.innerText);
+  /* Scope this to the cycle line itself. Testing !/Cycle 2 ·/ against the whole
+     body would false-fail the day any other element on the Log tab happened to
+     print the live cycle's name. */
+  const cycleLine = (label.match(/Cycle \d+ · Week \d+[^\n]*/) || ["(none)"])[0];
+  ok("the label names the archived cycle, not the live one",
+     /^Cycle 1 · Week \d+/.test(cycleLine), `-> ${cycleLine}`);
+  ok("Start Workout stays hidden in a past week", !/Start Workout/.test(label));
+
+  /* Phase 2's requirement is that daySessionInView actually resolves the
+     ARCHIVED session, so that week's logged sets appear. An "Old Press"
+     name match proved nothing: the exercise list is not cycle-scoped, so
+     the name renders in every week including the live one. Assert what only
+     the archived session can produce — the weight input holding its NATIVE
+     stored value (70, deliberately un-converted) under a column header and
+     placeholder reading kg, while data.unit is lb. In the live week that
+     input is blank and both read lb. */
+  ok("archived exercise card opens", await clickText("Old Press")); await wait(600);
+  const archivedRow = await page.evaluate(() => {
+    const w = document.querySelector('input[aria-label="weight"]');
+    return {
+      value: w ? w.value : null,
+      placeholder: w ? w.placeholder : null,
+      header: (document.body.innerText.match(/weight \((kg|lb)\)/i) || [])[1] || "",
+      dataUnit: JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => /^franco-fit-[aj]-v\d$/.test(k)))).unit,
+    };
+  });
+  ok("the archived week's logged sets appear, in that cycle's own unit",
+     archivedRow.value === "70" && /^kg$/i.test(archivedRow.header)
+       && /^kg$/i.test(archivedRow.placeholder || "") && archivedRow.dataUnit === "lb",
+     `-> ${JSON.stringify(archivedRow)}`);
+
+  /* Task 3 added sessionUnit so a weight typed into an earlier cycle is
+     stamped with THAT cycle's unit, not today's data.unit. The archived
+     card is open on the archived week, so type over its first weight and
+     check which unit the set now carries. */
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const w = document.querySelector('input[aria-label="weight"]');
+    setter.call(w, "133"); w.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await wait(200);
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const r = document.querySelector('input[aria-label="reps"]');
+    setter.call(r, "5"); r.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const findStamp = () => page.evaluate((k) => {
+    const d = JSON.parse(localStorage.getItem(k));
+    for (const s of Object.values(d.sessions)) {
+      const e = s.entries && s.entries.a;
+      const set = e && e.sets.find((x) => String(x.w) === "133");
+      if (set) return { date: s.date, u: set.u, dataUnit: d.unit };
+    }
+    return null;
+  }, KEY);
+  let stamp = null;
+  for (let i = 0; i < 30 && !stamp; i++) { stamp = await findStamp(); if (!stamp) await wait(150); }
+  ok("a weight typed into the archived cycle is stamped with THAT cycle's unit",
+     !!stamp && stamp.u === "kg", `-> ${JSON.stringify(stamp)}`);
+  ok("not with today's live-cycle unit", !!stamp && stamp.dataUnit === "lb" && stamp.u !== stamp.dataUnit,
+     `-> ${JSON.stringify(stamp)}`);
 
   ok("no page errors across the run", errors.length === 0, errors[0] ? `-> ${errors[0].slice(0, 120)}` : "");
 

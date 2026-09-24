@@ -333,15 +333,35 @@ const num = (v) => {
   const n = parseFloat(v);
   return isNaN(n) ? 0 : n;
 };
-const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.w) * num(s.r)), 0);
+/* ---- Units -------------------------------------------------------
+   A set stores the number the user typed, in whatever unit was current
+   at the time, plus a `u` stamp saying which. All volume math is done in
+   canonical kg so a kg-era session and an lb-era session can be compared
+   without lying about either; display converts back out.
+   An unstamped set is read as kg — after the migration only weightless
+   rows are unstamped, so this cannot misread real data, and it keeps
+   volumeOf total for a hand-edited blob. */
+const KG_PER_LB = 0.45359237;
+const kgOf = (s) => (s.u === "lb" ? num(s.w) * KG_PER_LB : num(s.w));
+const toUnit = (kg, unit) => (unit === "lb" ? kg / KG_PER_LB : kg);
+const volumeOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : kgOf(s) * num(s.r)), 0);
 const repsOf = (sets) => sets.reduce((a, s) => a + (s.skipped ? 0 : num(s.r)), 0);
 const isBodyweight = (sets) => volumeOf(sets) === 0 && repsOf(sets) > 0;
 const scoreOf = (sets) => { const v = volumeOf(sets); return v > 0 ? v : repsOf(sets); };
-const fmtVol = (n) => Math.round(n).toLocaleString("en-US");
-const setsLine = (sets) =>
+/* Volume arrives canonical (kg) and is shown in the unit the user is in, so
+   an all-time chart is continuous across a country move. */
+const fmtVol = (kg, unit) =>
+  `${Math.round(toUnit(kg, unit || "kg")).toLocaleString("en-US")} ${unit || "kg"}`;
+/* Read-only set lines convert into the current unit so a kg-era session and
+   an lb-era one can be read side by side. The EDITABLE input deliberately
+   does not — see SetRow. */
+const setsLine = (sets, unit) =>
   sets
     .filter((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0))
-    .map((s) => `${s.w}×${s.r}${s.tag ? ` (${s.tag})` : ""}`)
+    .map((s) => {
+      const w = num(s.w) > 0 ? Math.round(toUnit(kgOf(s), unit || "kg") * 10) / 10 : s.w;
+      return `${w}×${s.r}${s.tag ? ` (${s.tag})` : ""}`;
+    })
     .join("  ");
 const entryHasData = (e) => e && e.sets && e.sets.some((s) => !s.skipped && (num(s.r) > 0 || num(s.w) > 0));
 
@@ -659,6 +679,7 @@ function archiveCurrentCycle(d, endIso) {
     end: endIso,
     weeks: Math.max(d.cycleWeeks || 8, weeksBetween(d.cycleStart, endIso)),
     deloadWeeks: (d.deloadWeeks || []).slice(),
+    unit: d.unit,
   });
 }
 
@@ -694,6 +715,61 @@ function migrateCycleHistory(d) {
     weeks: weeksBetween(start, end),
     deloadWeeks: deloadWeeks.sort((a, b) => a - b),
   });
+  return d;
+}
+
+/* The unit this build seeds with, and therefore the unit its pre-migration
+   history was logged in. NOT data.unit: an install that has since switched
+   country reports the NEW unit there while its history is in the old one.
+   This value differs per build on purpose — see CLAUDE.md. */
+const SEED_UNIT = "kg";
+
+/* Stamp every weighted set with the unit it was logged in, once.
+
+   The unit change coincided with a cycle boundary, so a set's cycle
+   identifies its unit: an archived cycle was logged in SEED_UNIT, the live
+   cycle in data.unit. Stamping at migration rather than plumbing date
+   context through the volume functions means scoreOf and everything built
+   on it keep their signatures.
+
+   Idempotent — it runs on every load. A set that already carries `u` is
+   authoritative and is never rewritten, and no stored weight is modified.
+
+   Known gap: this assumes the unit only ever changes at a cycle boundary.
+   A unit switch mid-cycle would mis-stamp every set logged before the
+   switch within that same cycle, and nothing here can detect that case. */
+function migrateUnits(d) {
+  const views = cycleViews(d);
+  for (const c of (d.cycleHistory || [])) {
+    if (!c.unit) c.unit = SEED_UNIT;
+  }
+  const unitAt = (iso) => {
+    const v = viewFor(views, iso);
+    /* No view at all only happens for a date before the earliest archived
+       cycle (the live view has no end, so it matches everything from
+       cycleStart onward) — i.e. old history, which is SEED_UNIT's case. */
+    if (!v) return (d.cycleStart && iso < d.cycleStart) ? SEED_UNIT : (d.unit || SEED_UNIT);
+    if (v.isCurrent) return d.unit || SEED_UNIT;
+    const rec = (d.cycleHistory || []).find((c) => c.number === v.number);
+    return (rec && rec.unit) || SEED_UNIT;
+  };
+  for (const s of Object.values(d.sessions || {})) {
+    const u = unitAt(s.date);
+    for (const e of Object.values(s.entries || {})) {
+      for (const st of (e.sets || [])) {
+        if (st.u) continue;                /* already stamped */
+        if (!(num(st.w) > 0)) continue;    /* weightless row: stamp on entry */
+        st.u = u;
+      }
+    }
+  }
+  /* ex.prev is written at rollover from the outgoing cycle's top weight, so
+     its unit is that cycle's unit — the most recent archived one. */
+  const lastArchived = (d.cycleHistory || [])[(d.cycleHistory || []).length - 1];
+  const prevU = (lastArchived && lastArchived.unit) || SEED_UNIT;
+  for (const ex of (d.exercises || [])) {
+    if (ex.prev != null && !ex.prevU) ex.prevU = prevU;
+  }
   return d;
 }
 
@@ -811,6 +887,16 @@ function buildSheetRows(data) {
     rows.push([], ["Supersets"], ["Day", "Exercises", "Rounds"]);
     ssRows.forEach((r) => rows.push(r));
   }
+
+  /* Which unit this sheet's numbers are in. The grid is scoped to the live
+     cycle — weekOf is relative to data.cycleStart, so archived-cycle sessions
+     fall to negative week indices and appear in no cell — so listing every
+     cycle would describe data that is not in the file. Stated unconditionally
+     because a reader of a bare number needs it either way.
+     Known limit: a unit switch partway through the live cycle cannot be
+     expressed here; see migrateUnits' comment on the same gap. */
+  rows.push([], ["Units"], ["Cycle", "Unit"]);
+  rows.push([data.cycleName || `Cycle ${data.cycleNumber}`, data.unit || "kg"]);
   return rows;
 }
 
@@ -883,28 +969,31 @@ const VariantDot = ({ index }) => {
 };
 
 /* This week's status for a given training day */
-function dayWeekStatus(data, d, wArg) {
+function dayWeekStatus(data, d, wArg, viewArg) {
   const today = todayISO();
-  const w = wArg !== undefined ? wArg : Math.max(0, weekOfCycle(data, today));
-  const sess = daySessionIn(data, d, w);
+  const view = viewArg || { number: data.cycleNumber, name: data.cycleName, start: data.cycleStart,
+                            end: null, weeks: data.cycleWeeks || 8,
+                            deloadWeeks: data.deloadWeeks || [], isCurrent: true };
+  const w = wArg !== undefined ? wArg : Math.max(0, weekIn(view, today));
+  const sess = daySessionInView(data, view, d, w);
   if (sess) {
-    if (isDeloadWeek(data, w)) return "deload";
+    if (isDeloadWeekIn(view, w)) return "deload";
     const finished = sess.celebrated || sess.date < today;
     if (!finished) return "logged";
     let prev = null;
     for (let i = w - 1; i >= 0; i--) {
-      if (isDeloadWeek(data, i)) continue;
-      const p = daySessionIn(data, d, i); if (p) { prev = p; break; }
+      if (isDeloadWeekIn(view, i)) continue;
+      const p = daySessionInView(data, view, d, i); if (p) { prev = p; break; }
     }
     const dv = dayVolume(sess);
     const pv = prev ? dayVolume(prev) : null;
     return pv !== null && dv > pv ? "star" : pv !== null && dv < pv ? "down" : "logged";
   }
-  const dateIso = cellDateFor(data.cycleStart, w, d);
+  const dateIso = cellDateFor(view.start, w, d);
   if (dateIso === today) return "today";
   if (dateIso < today) {
     /* A deload day the user deliberately emptied is planned rest, not a miss */
-    if (isDeloadWeek(data, w) && exListFor(data, d, w).length === 0) return "optional";
+    if (isDeloadWeekIn(view, w) && exListForView(data, view, d, w).length === 0) return "optional";
     return OPTIONAL_DAYS[d] ? "optional" : "missed";
   }
   return "future";
@@ -932,13 +1021,16 @@ function SetRow({ idx, set, compareSet, unit, repGoal, hideIndex, onChange, onRe
   let repsCls = "";
   let target = null;
   if (compareSet) {
-    const lw = num(compareSet.w), lr = num(compareSet.r);
-    const lastScore = lw > 0 ? lw * lr : lr;
-    /* reps needed at today's weight to beat last week's set */
-    if (w > 0) target = Math.floor((lw * lr) / w) + 1;
-    else if (lw === 0) target = lr + 1;
+    /* Compare canonically: last week may be in a different unit from today,
+       and the answer must come back in THIS row's unit or the target would be
+       scaled wrong. */
+    const lwKg = kgOf(compareSet), lr = num(compareSet.r);
+    const wKg = kgOf(set);
+    const lastScore = lwKg > 0 ? lwKg * lr : lr;
+    if (wKg > 0) target = Math.floor((lwKg * lr) / wKg) + 1;
+    else if (lwKg === 0) target = lr + 1;
     if (r > 0) {
-      const todayScore = lw === 0 && w === 0 ? r : w * r;
+      const todayScore = lwKg === 0 && wKg === 0 ? r : wKg * r;
       repsCls = todayScore > lastScore ? "good" : todayScore < lastScore ? "bad" : "";
     }
   }
@@ -1025,6 +1117,22 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
   const lastSame = lastEntryFor(data, ex.id, variantId, sessionKey, sessionDate);
   const lastAny = lastEntryFor(data, ex.id, null, sessionKey, sessionDate);
 
+  /* The unit a new set in THIS session should carry. Not data.unit: once the
+     Log tab can reach an earlier cycle, a correction typed into a kg week
+     must be stamped kg, not today's lb. */
+  const sessionUnit = (() => {
+    const sd = sessionKey.split("|")[0];
+    const v = viewFor(cycleViews(data), sd);
+    /* No view can only mean a date before the live cycle's start — old
+       history, where data.unit is the wrong answer. Mirrors unitAt. */
+    if (!v) return (data.cycleStart && sd < data.cycleStart)
+      ? ((data.cycleHistory || []).length ? (data.cycleHistory[0].unit || data.unit) : data.unit) || "kg"
+      : (data.unit || "kg");
+    if (v.isCurrent) return data.unit || "kg";
+    const rec = (data.cycleHistory || []).find((c) => c.number === v.number);
+    return (rec && rec.unit) || data.unit || "kg";
+  })();
+
   const ensureEntry = (d) => {
     if (!d.sessions[sessionKey]) {
       d.sessions[sessionKey] = { date: sessionKey.split("|")[0], day: ex.day, entries: {} };
@@ -1044,13 +1152,30 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
     update((d) => {
       const e = ensureEntry(d);
       const oldW = String(e.sets[i].w ?? "");
-      e.sets[i] = ns;
+      /* Stamp the unit the moment a weight exists, and keep the stamp a row
+         already has. A row's existing stamp is what the column header and the
+         placeholder display (see colUnit), so preserving it is the only choice
+         that stores the unit the app just told the user it was reading. The
+         tempting alternative — re-stamping a CHANGED weight with sessionUnit —
+         differs only when a row's stamp disagrees with its session, which is
+         reachable in one tap via Manage -> Units mid-cycle; there it would
+         write kg into a column labelled lb, and mixed stamps across one
+         exercise, permanently. To re-unit a row deliberately, clear it first:
+         clearing drops the stamp, so the retype takes the session's unit. */
+      if (num(ns.w) > 0) {
+        e.sets[i] = { ...ns, u: ns.u || sessionUnit };
+      } else {
+        const { u, ...rest } = ns;
+        e.sets[i] = rest;
+      }
       /* Cascade weight down to blank/matching sets — but never cascade a clear */
       const newW = String(ns.w ?? "");
       if (newW !== oldW && newW !== "") {
         for (let j = i + 1; j < e.sets.length; j++) {
           const wj = String(e.sets[j].w ?? "");
-          if (wj === "" || wj === oldW) e.sets[j] = { ...e.sets[j], w: ns.w };
+          if (wj === "" || wj === oldW) {
+            e.sets[j] = { ...e.sets[j], w: ns.w, u: e.sets[j].u || sessionUnit };
+          }
         }
       }
     });
@@ -1059,7 +1184,14 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
     update((d) => {
       const e = ensureEntry(d);
       const lastWeighted = [...e.sets].reverse().find((s) => num(s.w) > 0);
-      e.sets.push({ w: lastWeighted ? lastWeighted.w : "", r: "", extra: true, tag: "" });
+      /* Copying a weight copies its unit: an unstamped weighted set would read
+         as kg until the next load stamped it, moving today's volume, the
+         semantic strip colour and the weekly record under the user. A
+         weightless extra row stays unstamped — it gets its unit when a weight
+         is first typed, which is the designed behaviour. */
+      e.sets.push(lastWeighted
+        ? { w: lastWeighted.w, r: "", extra: true, tag: "", u: lastWeighted.u || sessionUnit }
+        : { w: "", r: "", extra: true, tag: "" });
     });
 
   const setSkipAll = (v) => update((d) => { ensureEntry(d).skippedAll = v; });
@@ -1093,7 +1225,7 @@ function exerciseEntry(data, update, ex, sessionKey, isDeload) {
     exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
     changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
     hasLogged, plannedToday, exTotal, plannedFilled, exFilled, exComplete,
-    todayVol, lastVol, liveDelta, beating, stripColor, bodyweight, lastLogged,
+    todayVol, lastVol, liveDelta, beating, stripColor, bodyweight, lastLogged, sessionUnit,
   };
 }
 
@@ -1109,8 +1241,14 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
     exHome, entry, variantId, variant, lastSame, lastAny, ensureEntry,
     changeSet, addExtraSet, setSkipAll, removeSetAt, todaySets, skippedAll,
     plannedToday, exTotal, exFilled, exComplete, todayVol, lastVol,
-    liveDelta, beating, stripColor, bodyweight, lastLogged,
+    liveDelta, beating, stripColor, bodyweight, lastLogged, sessionUnit,
   } = exerciseEntry(data, update, ex, sessionKey, isDeload);
+
+  /* The unit the weight inputs on this card are in — the sets' own stamps
+     first, then this session's cycle. The editable input is deliberately not
+     converted, so its whole defence is that the header names the unit: header
+     and rows must read the same value or the placeholder lies. */
+  const colUnit = (todaySets.find((s) => s.u) || {}).u || sessionUnit || data.unit || "kg";
 
   /* Baked-in sets: opening the card lays out (and heals) the planned set count */
   useEffect(() => {
@@ -1163,7 +1301,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
               </div>
               <div style={{ color: T.muted, fontSize: 12.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {ex.variants.length > 1 ? `${variant.name} · ` : ""}
-                {lastSame ? `last ${fmtDate(lastSame.date)}: ${setsLine(lastSame.entry.sets)}` : "no history on this machine"}
+                {lastSame ? `last ${fmtDate(lastSame.date)}: ${setsLine(lastSame.entry.sets, data.unit)}` : "no history on this machine"}
               </div>
             </div>
           </Row>
@@ -1200,10 +1338,10 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                     Last time · {fmtDate(lastSame.date)}
                   </span>
                   <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
-                    {bodyweight ? `${repsOf(lastSame.entry.sets)} reps` : `vol ${fmtVol(lastVol)}`}
+                    {bodyweight ? `${repsOf(lastSame.entry.sets)} reps` : fmtVol(lastVol, data.unit)}
                   </span>
                 </Row>
-                <div className="ll-num" style={{ fontSize: 15.5, lineHeight: 1.5 }}>{setsLine(lastSame.entry.sets)}</div>
+                <div className="ll-num" style={{ fontSize: 15.5, lineHeight: 1.5 }}>{setsLine(lastSame.entry.sets, data.unit)}</div>
                 {lastSame.entry.sets.some((s) => s.skipped && s.skipNote) && (
                   <div style={{ color: T.faint, fontSize: 12, marginTop: 4 }}>
                     {lastSame.entry.sets
@@ -1219,7 +1357,7 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
                 <div style={{ color: T.muted, fontSize: 13.5 }}>First time on <b style={{ color: T.ink }}>{variant.name}</b>.</div>
                 {lastAny && (
                   <div style={{ color: T.faint, fontSize: 12.5, marginTop: 4 }}>
-                    Other machine, {fmtDate(lastAny.date)}: <span className="ll-num">{setsLine(lastAny.entry.sets)}</span>
+                    Other machine, {fmtDate(lastAny.date)}: <span className="ll-num">{setsLine(lastAny.entry.sets, data.unit)}</span>
                   </div>
                 )}
               </>
@@ -1298,11 +1436,11 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
             <>
               {todaySets.length > 0 && (
                 <Row style={{ justifyContent: "center", gap: 6, margin: "2px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-                  <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+                  <span>weight ({colUnit})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
                 </Row>
               )}
               {todaySets.map((s, i) => (
-                <SetRow key={i} idx={i} set={s} unit={data.unit} repGoal={ex.repGoal}
+                <SetRow key={i} idx={i} set={s} unit={colUnit} repGoal={ex.repGoal}
                   compareSet={isDeload || s.extra ? undefined : lastLogged[i]}
                   onChange={(ns) => changeSet(i, ns)}
                   onRemove={() => removeSetAt(i)} />
@@ -1319,7 +1457,9 @@ function ExerciseCard({ data, update, ex, sessionKey, dayColor, isDeload }) {
               {exComplete && (
                 <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ color: T.muted, fontSize: 13 }}>
-                    Today: <span className="ll-num" style={{ color: T.ink }}>{fmtVol(todayVol)}</span> {isBodyweight(todaySets) ? "reps" : "vol"}
+                    Today: <span className="ll-num" style={{ color: T.ink }}>
+                      {isBodyweight(todaySets) ? `${repsOf(todaySets)} reps` : fmtVol(todayVol, data.unit)}
+                    </span>
                   </span>
                   {!data.hideDeltas && <Delta value={liveDelta} />}
                 </Row>
@@ -1382,6 +1522,12 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
   const rounds = group.rounds;
   /* One entry controller per member, in render order. */
   const ctl = members.map((m) => exerciseEntry(data, update, m, sessionKey, isDeload));
+  /* Column unit, per member: stamps first, then that member's session cycle.
+     A superset's members share a session and so a unit, but deriving it per
+     row keeps the row honest if a stamp ever disagrees. Tolerates a missing
+     ctl slot so the header cannot be the one thing that throws. */
+  const unitOf = (c) => (((c && c.todaySets) || []).find((x) => x.u) || {}).u || (c && c.sessionUnit) || data.unit || "kg";
+  const colUnit = unitOf(ctl[0]);
 
   /* Baked-in sets: opening the card lays out (and heals) every member's
      planned set count, mirroring ExerciseCard. */
@@ -1472,7 +1618,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
             <Row key={m.id} style={{ justifyContent: "space-between", marginTop: 3 }}>
               <span style={{ color: T.muted, fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {m.icon ? m.icon + " " : ""}{m.name}
-                {ctl[i].lastSame ? <span style={{ color: T.faint }}> · last {setsLine(ctl[i].lastSame.entry.sets)}</span> : null}
+                {ctl[i].lastSame ? <span style={{ color: T.faint }}> · last {setsLine(ctl[i].lastSame.entry.sets, data.unit)}</span> : null}
               </span>
               <Row style={{ gap: 7, flex: "none" }}>
                 <span className="ll-num" style={{ color: T.faint, fontSize: 11.5 }}>{ctl[i].exFilled}/{ctl[i].exTotal}</span>
@@ -1486,7 +1632,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
       {open && (
         <div className="ll-fade" style={{ padding: "0 14px 14px", borderTop: `1px solid ${T.line}` }}>
           <Row style={{ justifyContent: "center", gap: 6, margin: "10px 0 8px", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.faint }}>
-            <span>weight ({data.unit || "kg"})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
+            <span>weight ({colUnit})</span><span>×</span><span style={{ color: T.amber }}>reps</span>
           </Row>
 
           {/* rounds — a continuous rail runs the full height of this region,
@@ -1519,7 +1665,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                       <div style={{ fontSize: 12, color: T.muted, marginBottom: 2 }}>
                         {m.icon ? m.icon + " " : ""}{ctl[i].entry && ctl[i].entry.swapName ? ctl[i].entry.swapName : m.name}
                       </div>
-                      <SetRow idx={r} set={s} unit={data.unit} repGoal={m.repGoal} hideIndex
+                      <SetRow idx={r} set={s} unit={unitOf(ctl[i])} repGoal={m.repGoal} hideIndex
                         compareSet={isDeload ? undefined : ctl[i].lastLogged[r]}
                         onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
                         onRemove={() => ctl[i].removeSetAt(absIdx)} />
@@ -1537,7 +1683,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                 Extra · {m.name} only
               </div>
               <div style={{ borderLeft: `2px solid ${T.line}`, paddingLeft: 9 }}>
-                <SetRow idx={absIdx} set={s} unit={data.unit} repGoal={m.repGoal} compareSet={undefined}
+                <SetRow idx={absIdx} set={s} unit={unitOf(ctl[i])} repGoal={m.repGoal} compareSet={undefined}
                   onChange={(ns) => ctl[i].changeSet(absIdx, ns)}
                   onRemove={() => ctl[i].removeSetAt(absIdx)} />
               </div>
@@ -1562,7 +1708,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
               </div>
               {ctl[i].lastSame ? (
                 <div className="ll-num" style={{ fontSize: 14.5, marginBottom: 8 }}>
-                  Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets)}
+                  Last {fmtDate(ctl[i].lastSame.date)}: {setsLine(ctl[i].lastSame.entry.sets, data.unit)}
                 </div>
               ) : (
                 <div style={{ marginBottom: 8 }}>
@@ -1573,7 +1719,7 @@ function SupersetCard({ data, update, group, sessionKey, dayColor, isDeload, ini
                       a member's first session on a new machine showed nothing. */}
                   {ctl[i].lastAny && (
                     <div style={{ color: T.faint, fontSize: 12.5, marginTop: 4 }}>
-                      Other machine, {fmtDate(ctl[i].lastAny.date)}: <span className="ll-num">{setsLine(ctl[i].lastAny.entry.sets)}</span>
+                      Other machine, {fmtDate(ctl[i].lastAny.date)}: <span className="ll-num">{setsLine(ctl[i].lastAny.entry.sets, data.unit)}</span>
                     </div>
                   )}
                 </div>
@@ -1736,7 +1882,7 @@ function Celebration({ msg, from, image, refeed, reward, record, finale, onClose
         <div style={{ marginTop: 16, background: "rgba(0,0,0,0.4)", border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 18px", maxWidth: 320 }}>
           <div className="ll-display" style={{ fontSize: 16, letterSpacing: "0.14em", color: (reward && reward.color) || "#F6C851", marginBottom: 6 }}>CYCLE COMPLETE</div>
           <div style={{ fontSize: 13.5, color: T.ink, lineHeight: 1.5 }}>
-            Total volume <span className="ll-num">{fmtVol(finale.vol)}</span> · {finale.wins} winning days
+            Total volume <span className="ll-num">{fmtVol(finale.vol, finale.unit)}</span> · {finale.wins} winning days
             {finale.best ? ` · Most improved: ${finale.best.name} +${Math.round(finale.best.pctv)}%` : ""}
           </div>
           <div style={{ fontSize: 12, color: T.faint, marginTop: 4 }}>≈ {finale.trucks} pickup trucks lifted this cycle</div>
@@ -1758,14 +1904,33 @@ function Celebration({ msg, from, image, refeed, reward, record, finale, onClose
 function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote }) {
   const rw = rewardOf(data);
   const [weekOffset, setWeekOffset] = useState(0);
+  /* Navigate by DATE, not by an index inside the live cycle: a week index
+     floored at 0 made every earlier cycle unreachable. Resolve the week's
+     date first, then ask which cycle owns it. */
+  const views = cycleViews(data);
   const curWeek = Math.max(0, weekOfCycle(data, todayISO()));
   const maxWeek = Math.max((data.cycleWeeks || 8) - 1, curWeek);
-  const wIdx = Math.min(maxWeek, Math.max(0, curWeek + weekOffset));
-  const existing = daySessionIn(data, day, wIdx);
-  const dateFor = existing ? existing.date : cellDateFor(data.cycleStart, wIdx, day);
+  /* Anchor on the SELECTED day's date in the offset week, so the anchor is
+     the very date we are about to render — not some other weekday's. */
+  const weekAnchor = addDays(cellDateFor(data.cycleStart, curWeek, day), weekOffset * 7);
+  /* Cycles are contiguous, so viewFor normally hits. It can miss only past
+     both ends: clamp to the earliest or latest cycle accordingly. */
+  const wView = viewFor(views, weekAnchor) ||
+    (weekAnchor < views[0].start ? views[0] : views[views.length - 1]);
+  const wIdx = Math.max(0, weekIn(wView, weekAnchor));
+  const existing = daySessionInView(data, wView, day, wIdx);
+  const dateFor = existing ? existing.date : cellDateFor(wView.start, wIdx, day);
   const sessionKey = existing ? existing.key : `${dateFor}|${day}`;
-  const isDeload = isDeloadWeek(data, wIdx);
-  const exList = exListFor(data, day, wIdx);
+  const isDeload = isDeloadWeekIn(wView, wIdx);
+  const exList = exListForView(data, wView, day, wIdx);
+  /* Backward limit is week 0 of the EARLIEST cycle, not week 0 of the live
+     one. Comparing dates would be wrong: the anchor is the selected weekday,
+     which can sit after a cycle's Monday start while still inside week 0, so
+     a date comparison would let ‹ step past the earliest cycle into an
+     unresolvable date. Forward stays capped at the live cycle's planned
+     length. */
+  const atEarliest = wView.number === views[0].number && wIdx <= 0;
+  const atLatest = wView.isCurrent && wIdx >= maxWeek;
   const isToday = dateFor === todayISO();
 
   const sess = data.sessions[sessionKey];
@@ -1882,6 +2047,11 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
     const finalW = (data.cycleWeeks || 8) - 1;
     /* An emptied deload day never produces a session — it is planned rest,
        so it must not hold the finale hostage. */
+    /* wIdx is VIEW-relative (it can name a week of an archived cycle) while
+       daySessionIn / isDeloadWeek / exListFor all index the LIVE cycle. These
+       three calls are correct ONLY because Finish is gated on
+       weekOffset === 0 (see the Finish Workout button). Move that gate and
+       these must become their *InView forms, scoped to wView. */
     const dayClosed = (dd) =>
       OPTIONAL_DAYS[dd] || dd === day || daySessionIn(data, dd, wIdx) ||
       (isDeloadWeek(data, wIdx) && exListFor(data, dd, wIdx).length === 0);
@@ -1913,8 +2083,10 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
           }
         }
       });
+      /* 4000 lb and 1800 kg are the same truck, so the divisor is in DISPLAY
+         units — vol is canonical kg and has to be converted first. */
       const per = data.unit === "lb" ? 4000 : 1800;
-      finale = { vol, wins, best, trucks: Math.max(1, Math.round(vol / per)) };
+      finale = { vol, wins, best, trucks: Math.max(1, Math.round(toUnit(vol, data.unit) / per)), unit: data.unit };
     }
 
     setCelebration({ msg, from: note ? PARTNER_NAME : null, image: note ? (note.image || null) : null, refeed: preRefeed, reward: rewardOf(data), record, finale });
@@ -1945,11 +2117,11 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
         />
       )}
       <Row style={{ gap: 4, flexWrap: "wrap", padding: "6px 2px 12px", alignItems: "center" }}>
-        <button className="ll-chip ll-day" disabled={wIdx <= 0} aria-label="previous week"
-          style={{ opacity: wIdx <= 0 ? 0.35 : 1 }}
+        <button className="ll-chip ll-day" disabled={atEarliest} aria-label="previous week"
+          style={{ opacity: atEarliest ? 0.35 : 1 }}
           onClick={() => setWeekOffset(weekOffset - 1)}>‹</button>
         {DAYS.map((d) => {
-          const st = dayWeekStatus(data, d, wIdx);
+          const st = dayWeekStatus(data, d, wIdx, wView);
           return (
             <button key={d} className={`ll-chip ll-day ${d === day ? "on" : ""} ${st === "star" ? "starred" : ""} ${OPTIONAL_DAYS[d] ? "optional" : ""}`}
               style={st === "star" ? { borderColor: `${rw.color}8C`, background: `${rw.color}12`, boxShadow: `0 0 9px ${rw.color}59` } : {}}
@@ -1959,8 +2131,8 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
             </button>
           );
         })}
-        <button className="ll-chip ll-day" disabled={wIdx >= maxWeek} aria-label="next week"
-          style={{ opacity: wIdx >= maxWeek ? 0.35 : 1 }}
+        <button className="ll-chip ll-day" disabled={atLatest} aria-label="next week"
+          style={{ opacity: atLatest ? 0.35 : 1 }}
           onClick={() => setWeekOffset(weekOffset + 1)}>›</button>
       </Row>
       <Row style={{ justifyContent: "space-between", marginBottom: 10 }}>
@@ -1969,7 +2141,7 @@ function TodayView({ data, update, day, setDay, notes, refreshInbox, deliverNote
             {day} <span style={{ color: T.muted, fontSize: 17, fontWeight: 500 }}>· {fmtDate(dateFor)}</span>
           </div>
           <div style={{ color: T.muted, fontSize: 13 }}>
-            Cycle {data.cycleNumber} · Week {wIdx + 1}{isDeload ? " · ☾ deload" : ""}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
+            {wView.name} · Week {wIdx + 1}{isDeload ? " · ☾ deload" : ""}{OPTIONAL_DAYS[day] ? " · optional day" : ""}{isToday ? " · today" : weekOffset < 0 ? " · past week" : weekOffset > 0 ? " · upcoming" : ""}
           </div>
         </div>
       </Row>
@@ -2344,7 +2516,9 @@ function TrendCard({ data, update, day, views, view, cycleScope }) {
           value: dayVolume(s),
           deload: isDeloadSess(data, s),
         }));
-    chart = { points: pts, color: T.pos, fmt: fmtVol };
+    /* fmt is called as fmt(value); without the unit fmtVol falls back to kg
+       and prints canonical kg under a "kg" label for a user logging in lb. */
+    chart = { points: pts, color: T.pos, fmt: (n) => fmtVol(n, data.unit) };
   }
 
   const saveWeight = () => {
@@ -2667,7 +2841,7 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
           <Delta value={delta} />
         </Row>
         <div style={{ color: T.muted, fontSize: 13, marginBottom: 14 }}>
-          {sv.isCurrent ? "" : `${sv.name} · `}Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol)}</span>
+          {sv.isCurrent ? "" : `${sv.name} · `}Week {w + 1} · day volume <span className="ll-num">{fmtVol(vol, data.unit)}</span>
           {prev ? ` · vs week ${weekIn(sv, prev.date) + 1}` : ""}
         </div>
         {(sess.dayNote || "").trim() && <div className="ll-note" style={{ marginBottom: 14 }}>“{sess.dayNote}”</div>}
@@ -2734,14 +2908,14 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
                     <Row style={{ gap: 8, flex: "none" }}>
                       <Delta value={exDelta} />
                       <span className="ll-num" style={{ color: T.muted, fontSize: 12.5 }}>
-                        {isBodyweight(e.sets) ? `${repsOf(e.sets)} reps` : fmtVol(evol)}
+                        {isBodyweight(e.sets) ? `${repsOf(e.sets)} reps` : fmtVol(evol, data.unit)}
                       </span>
                     </Row>
                   </Row>
                   {vName && vName !== "Usual machine" && (
                     <div style={{ color: T.muted, fontSize: 12, marginBottom: 3 }}>{vName}</div>
                   )}
-                  <div className="ll-num" style={{ fontSize: 14.5 }}>{setsLine(e.sets)}</div>
+                  <div className="ll-num" style={{ fontSize: 14.5 }}>{setsLine(e.sets, data.unit)}</div>
                   {e.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{e.note}”</div> : null}
                 </div>
               </Row>
@@ -2798,8 +2972,8 @@ function ProgressView({ data, update, day, setDay, onGoToday }) {
               </Row>
               <PlateBar frac={r.vol / maxVol} color={T.amber} />
               <Row style={{ justifyContent: "space-between", marginTop: 7 }}>
-                <span className="ll-num" style={{ color: T.muted, fontSize: 13 }}>{setsLine(r.entry.sets)}</span>
-                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{isBodyweight(r.entry.sets) ? `${repsOf(r.entry.sets)} reps` : fmtVol(r.vol)}</span>
+                <span className="ll-num" style={{ color: T.muted, fontSize: 13 }}>{setsLine(r.entry.sets, data.unit)}</span>
+                <span className="ll-num" style={{ fontSize: 13, color: T.ink }}>{isBodyweight(r.entry.sets) ? `${repsOf(r.entry.sets)} reps` : fmtVol(r.vol, data.unit)}</span>
               </Row>
               {r.entry.note ? <div className="ll-note" style={{ marginTop: 8 }}>“{r.entry.note}”</div> : null}
             </div>
@@ -3101,6 +3275,7 @@ function ManageView({ data, update, reseed, restore }) {
         if (last) {
           const top = Math.max(...last.entry.sets.map((s) => num(s.w)));
           ex.prev = isFinite(top) ? top : ex.prev;
+          ex.prevU = d.unit;
         }
       });
       /* Freeze the outgoing cycle so Progress can still page back to it.
@@ -3904,7 +4079,13 @@ function App() {
           if (!parsed.noteAcks) parsed.noteAcks = {};
           if (!parsed.deloadWeeks) parsed.deloadWeeks = [];
           if (!parsed.deloadPlan) parsed.deloadPlan = {};
-          migrateCycleHistory(parsed);
+          /* Each migration is guarded on its own: the catch below reseeds from
+             scratch and overwrites the cloud row, so an unexpected throw in a
+             migration must degrade to un-migrated data, never to data loss.
+             The `throw new Error("empty")` further down is deliberate control
+             flow into that reseed and stays unguarded. */
+          try { migrateCycleHistory(parsed); } catch (e) { console.warn("cycle-history migration skipped", e); }
+          try { migrateUnits(parsed); } catch (e) { console.warn("unit migration skipped", e); }
           applySchedule(parsed.refeedDay);
           applyTheme(parsed.theme);
           bootNotes(parsed);
@@ -4029,7 +4210,7 @@ function App() {
           <ProgressView data={data} update={update} day={day} setDay={setDay}
             onGoToday={(d) => { setDay(d); setTab("today"); }} />
         )}
-        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { migrateCycleHistory(next); applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
+        {tab === "manage" && <ManageView data={data} update={update} reseed={reseed} restore={(next) => { try { migrateCycleHistory(next); } catch (e) { console.warn("cycle-history migration skipped", e); } try { migrateUnits(next); } catch (e) { console.warn("unit migration skipped", e); } applySchedule(next.refeedDay); applyTheme(next.theme || "iron"); setData(next); scheduleSave(next); }} />}
       </div>
       <nav className="ll-tabbar">
         {[["today", "Log"], ["progress", "Progress"], ["manage", "Manage"]].map(([id, label]) => (

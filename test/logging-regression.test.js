@@ -4,6 +4,7 @@
 const path = require("path");
 const puppeteer = require("puppeteer-core");
 const FX = require("./fixture.js");
+const { daySelector } = require("./day-select.js");
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FILE = process.argv[2] || "j.html";
@@ -78,6 +79,16 @@ const blob = {
   }, sel, idx, val);
 
   console.log(`\n== ${FILE} · single-exercise logging regression ==`);
+
+  /* The Log tab opens on defaultDay(), which is the fixture's training day
+     only 4 weekdays in 7 (see test/day-select.js). Every assertion in this
+     file reads that day's card, so pin it before asserting anything —
+     otherwise the whole suite cries wolf 3 days out of every 7. */
+  const { headerDay, selectDay } = daySelector(page, wait);
+  ok("the fixture's training day is selected", await selectDay(FD.day),
+     `-> header says ${await headerDay()}, want ${FD.day}`);
+  await wait(400);
+
   ok("app boots on the Log tab", /Test Press/.test(await txt()));
 
   ok("exercise card opens", await clickText("Test Press")); await wait(500);
@@ -114,6 +125,26 @@ const blob = {
   /* completion: both planned sets logged */
   await wait(300);
   ok("card reports today's volume once complete", /Today:/.test(await txt()));
+
+  /* A bodyweight exercise scores as a rep count, which is unitless. Clearing
+     every weight while keeping reps is the reachable way to hit that branch —
+     it must not print a converted number or a kg/lb label. */
+  const nW = await page.evaluate(() => document.querySelectorAll('input[aria-label="weight"]').length);
+  for (let i = 0; i < nW; i++) {
+    await page.evaluate((i) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      const w = document.querySelectorAll('input[aria-label="weight"]')[i];
+      setter.call(w, ""); w.dispatchEvent(new Event("input", { bubbles: true }));
+    }, i);
+    await wait(120);
+  }
+  await wait(600);
+  const todayLine = await page.evaluate(() => {
+    const m = (document.body.innerText.match(/Today:[^\n]*/) || [""])[0];
+    return m.trim();
+  });
+  ok("bodyweight Today line reads as reps", /\breps\b/.test(todayLine), `-> "${todayLine}"`);
+  ok("bodyweight Today line carries no weight unit", !/\b(kg|lb)\b/.test(todayLine), `-> "${todayLine}"`);
 
   /* extra sets still append outside the planned total */
   ok("extra set button present", await clickText("+ Extra set")); await wait(500);
